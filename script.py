@@ -38,7 +38,7 @@ def filter_dataframes(dataframes, filter_column, filter_values):
     return filtered_data_weather
 
 # Chemin du répertoire
-data_directory = r"C:\Users\weyth\Downloads\Python-20250110\data"
+data_directory = r"C:\Users\carra\Downloads\Python-20250115\data"
 
 # Charger les données \n for tab
 all_data_weather = open_all_files_in_directory(data_directory, "data_weather_2022-12-25", ',')
@@ -82,6 +82,16 @@ else:
 # Create map
 map = folium.Map(location=map_center, zoom_start=6)
 
+# Ajout d'un marker avec une icône personnalisée
+icone_maison = folium.CustomIcon(
+    icon_image=r"C:\Users\carra\Desktop\projet_python\analyse_velo\velo.png",  # Chemin local
+    # OU utilisez une URL web
+    # icon_image='https://exemple.com/image.png',
+    icon_size=(40, 40),  # Taille de l'icône (largeur, hauteur) en pixels
+    icon_anchor=(20, 40),  # Point d'ancrage (moitié de la largeur, hauteur totale)
+    popup_anchor=(0, -40)     # Taille de l'icône (largeur, hauteur)
+)
+
 # Add markers with color gradient based on temperature
 for lat, lon, temp in normalized_data:
     # Create RGB color (red for high, green for low)
@@ -89,13 +99,23 @@ for lat, lon, temp in normalized_data:
     
     folium.CircleMarker(
         location=[lat, lon],
-        radius=10,
-        popup=f'Temperature: {temp * (max_temp - min_temp) + min_temp:.2f}°C',
-        color=color,
+        radius=temp * (max_temp - min_temp) + min_temp,
+        color='',                   # Pas de couleur pour le contour
+        weight=0,
         fill=True,
         fillColor=color,
-        fillOpacity=0.7
+        fillOpacity=0.3
+    
     ).add_to(map)
+    
+    folium.Marker(
+        location=[lat, lon],
+        popup=f'Temperature: {temp * (max_temp - min_temp) + min_temp:.2f}°C',
+        icon=icone_maison
+
+    
+    ).add_to(map)
+
 
 # Add white markers if no temperature data is present
 for df in filtered_data_weather:
