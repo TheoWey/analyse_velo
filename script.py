@@ -40,7 +40,7 @@ def filter_dataframes(dataframes, filter_column, filter_values):
 # Chemin du répertoire
 data_directory = r"C:\Users\carra\Downloads\Python-20250115\data"
 
-# Charger les données \n for tab
+# Charger les données \t for tab
 all_data_weather = open_all_files_in_directory(data_directory, "data_weather_2022-12-25", ',')
 all_data_bike = open_all_files_in_directory(data_directory, "data_bike_2022-12-25", '\t')
 # Filtrer les données pour garder uniquement "amiens" et "marseille"
@@ -116,6 +116,41 @@ for lat, lon, temp in normalized_data:
     
     ).add_to(map)
 
+
+# Add white markers if no temperature data is present
+for df in filtered_data_weather:
+    if all(col in df.columns for col in ['lon', 'lat']) and 'temp' not in df.columns:
+        for _, row in df.iterrows():
+            try:
+                lat = float(str(row['lat']).replace(',', '.'))
+                lon = float(str(row['lon']).replace(',', '.'))
+                folium.CircleMarker(
+                    location=[lat, lon],
+                    radius=10,
+                    popup='No temperature data',
+                    color='white',
+                    fill=True,
+                    fillColor='white',
+                    fillOpacity=0.6
+                ).add_to(map)
+            except (ValueError, TypeError) as e:
+                continue
+
+=======
+# Add markers with color gradient based on temperature
+for lat, lon, temp in normalized_data:
+    # Create RGB color (red for high, green for low)
+    color = f'#{int(255 * ( temp)):02x}{int(255 * (1 - temp)):02x}00'
+    
+    folium.CircleMarker(
+        location=[lat, lon],
+        radius=10,
+        popup=f'Temperature: {temp * (max_temp - min_temp) + min_temp:.2f}°C',
+        color=color,
+        fill=True,
+        fillColor=color,
+        fillOpacity=0.7
+    ).add_to(map)
 
 # Add white markers if no temperature data is present
 for df in filtered_data_weather:
