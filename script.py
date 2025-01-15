@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import folium
 from folium.plugins import HeatMap
+from sklearn.linear_model import LinearRegression
 
 def open_file(path, separator):
     try:
@@ -36,6 +37,49 @@ def filter_dataframes(dataframes, filter_column, filter_values):
             filtered_df = df[df[filter_column].isin(filter_values)]
             filtered_data_weather.append(filtered_df)
     return filtered_data_weather
+
+def clean_data(df):
+    # Remove duplicates
+    df = df.drop_duplicates()
+    
+    # Handle missing values
+    df = df.dropna()  # or use df.fillna() to fill missing values
+    
+    # Handle outliers (example: removing rows where temperature is outside a reasonable range)
+    df = df[(df['temp'] >= -50) & (df['temp'] <= 50)]
+    
+    return df
+
+def univariate_analysis(df, column):
+    return df[column].describe()
+
+def bivariate_analysis(df, column1, column2):
+    return df[[column1, column2]].describe()
+
+def correlation_analysis(df1, df2, column1, column2):
+    merged_df = pd.merge(df1, df2, on='timestamp')
+    correlation = merged_df[[column1, column2]].corr()
+    return correlation
+
+def analyze_bike_data(df):
+    # Example: Group by hour to analyze peak/off-peak hours
+    df['hour'] = df['timestamp'].dt.hour
+    peak_hours = df.groupby('hour').size()
+    
+    # Example: Group by day of the week to analyze weekdays/weekends
+    df['day_of_week'] = df['timestamp'].dt.dayofweek
+    weekdays_vs_weekends = df.groupby('day_of_week').size()
+    
+    return peak_hours, weekdays_vs_weekends
+
+def project_bike_usage(df, feature_columns, target_column):
+    X = df[feature_columns]
+    y = df[target_column]
+    
+    model = LinearRegression()
+    model.fit(X, y)
+    
+    return model
 
 # Chemin du répertoire
 data_directory = r"C:\Users\weyth\Downloads\Python-20250110\data"
