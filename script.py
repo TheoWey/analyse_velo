@@ -1,14 +1,13 @@
 import numpy as np
 import pandas as pd
-
 import os
 from datetime import datetime
 import folium
 from folium.plugins import HeatMap
 
-# Demander à l'utilisateur de spécifier l'heure (exemple: "2022-12-25 14:00:00")
-specified_time = "2022-06-02 19:00:00"
-specified_time = datetime.strptime(specified_time, '%Y-%m-%d %H:%M:%S')
+# Demander à l'utilisateur de spécifier l'heure (exemple: "2022-12-25 14:00")
+specified_time = "2022-06-02 19:58"
+specified_time = datetime.strptime(specified_time, '%Y-%m-%d %H:%M')
 formatted_time = specified_time.strftime('%Y-%m-%dT%H')
 print(formatted_time)
 
@@ -28,6 +27,8 @@ def open_file(path, separator):
     data = data.applymap(lambda x: str(x).replace('.', ',') if isinstance(x, str) else x)
     return data
 
+
+#Ouvre un fichier spécifié ou tout fichier contenant le date de discrimination
 def open_all_files_in_directory(directory_path, name, separator):
     print(name)
     all_data = []
@@ -42,7 +43,7 @@ def open_all_files_in_directory(directory_path, name, separator):
     return all_data
 
 
-
+#fonction pour filtrer les donnée pour garder uniquement marseille et amiens
 def filter_dataframes(dataframes, filter_column, filter_values):
     filtered_data = []
     for df in dataframes:
@@ -82,8 +83,20 @@ all_data_weather = open_all_files_in_directory(data_directory, f"data_weather_{f
 all_data_bike = open_all_files_in_directory(data_directory, f"data_bike_{formatted_time}", '\t')
 all_data_station = open_all_files_in_directory(data_station_directory, "bike_station.txt", '\t')
 
+#Copy the current header of all_data_bikes before replacing it
+current_headers = [df.columns.tolist() for df in all_data_bike]
+
+#Replace the header of all_data_bikes with the correct one
+correct_header = ['name', 'id', 'request_date', 'datetime', 'bikes']
+all_data_bike = [df.rename(columns=dict(zip(df.columns, correct_header))) for df in all_data_bike]
+
+#Add the current headers as a new row in each dataframe
+for i, df in enumerate(all_data_bike):
+    new_row = pd.DataFrame([current_headers[i]], columns=correct_header)
+    all_data_bike[i] = pd.concat([new_row, df], ignore_index=True)
 
 
+print(all_data_bike)
 # Filtrer les données pour garder uniquement "amiens" et "marseille"
 filtered_data_weather = filter_dataframes(all_data_weather, filter_column='name', filter_values=['Amiens','Marseille'])
 filtered_data_bike = filter_dataframes(all_data_bike, filter_column='name', filter_values=['amiens','marseille'])
@@ -99,7 +112,8 @@ for df in filtered_data_station:
                 lat = float(str(row['latitude']).replace(',', '.'))
                 lon = float(str(row['longitude']).replace(',', '.'))
                 station_id = row['id']  # ID de la station
-                normalized_data.append([lat, lon, station_id])  # Ajouter l'ID à la liste
+                places = row['bike_stands']
+                normalized_data.append([lat, lon, station_id, places])  # Ajouter l'ID à la liste
             except (ValueError, TypeError) as e:
                 continue      
 
@@ -113,26 +127,43 @@ map = folium.Map(location=map_center, zoom_start=6)
 print("filtered data bike")
 print(filtered_data_bike)
 # Add markers with color 
-for lat, lon, station_id in normalized_data :
+for lat, lon, station_id, places in normalized_data :
     # Appeler la fonction mise à jour pour récupérer le nombre de vélos
     bike_count = get_bike_count_at_time(filtered_data_bike, station_id, specified_time)
 
     # Ajouter un marqueur pour chaque station
     if bike_count is not None:
-        popup_text = f"Station ID: {station_id}<br>Vélos disponibles: {bike_count}"
+        # Calculer le pourcentage de vélos disponibles
+        percentage = (bike_count / int(places)) * 100
+
+        # Créer le code HTML pour le popup avec une barre de progression
+        popup_html = f"""
+        <div style="width: 200px;">
+            <h4>Station ID: {station_id}</h4>
+            <p>Vélos disponibles: {bike_count}/{int(places)}</p>
+            <div style="background-color: #e0e0e0; border-radius: 5px; padding: 2px;">
+                <div style="width: {percentage}%; background-color: #76c7c0; height: 20px; border-radius: 5px;"></div>
+            </div>
+        </div>
+        """
         color = "green" if bike_count > 5 else "orange" if bike_count > 0 else "red"
     else:
-        popup_text = f"Station ID: {station_id}<br>Aucune donnée disponible"
+        popup_html = f"""
+        <div style="width: 200px;">
+            <h4>Station ID: {station_id}</h4>
+            <p>Aucune donnée disponible</p>
+        </div>
+        """
         color = "gray"
 
     folium.Marker(
         location=[lat, lon],
-        popup=popup_text,
+        popup=folium.Popup(popup_html, max_width=250),
         icon=folium.Icon(icon="bicycle", prefix="fa", color=color)
     ).add_to(map)
 
 # Save the map to an HTML file
-map.save('temperature_gradient_map.html')
+map.save('velo_map.html')
 
 # Afficher les résultats
 print(filtered_data_station)
