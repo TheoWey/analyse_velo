@@ -8,6 +8,7 @@ from sklearn.linear_model import LinearRegression
 def open_file(path, separator):
     try:
         # Lecture du fichier avec gestion des exceptions
+        print(f"Reading file: {path}")
         data = pd.read_csv(filepath_or_buffer=path, sep=separator)
     except pd.errors.EmptyDataError:
         print(f"No columns to parse from file: {path}")
@@ -15,9 +16,6 @@ def open_file(path, separator):
     except Exception as e:
         print(f"Error reading file {path}: {e}")
         return pd.DataFrame()
-    
-    # Remplacer les points par des virgules dans les chaînes de caractères
-    data = data.applymap(lambda x: str(x).replace('.', ',') if isinstance(x, str) else x)
     return data
 
 def open_all_files_in_directory(directory_path, name, separator):
@@ -46,7 +44,9 @@ def clean_data(df):
     df = df.dropna()  # or use df.fillna() to fill missing values
     
     # Handle outliers (example: removing rows where temperature is outside a reasonable range)
-    df = df[(df['temp'] >= -50) & (df['temp'] <= 50)]
+    if 'temp' in df.columns:
+        df['temp'] = pd.to_numeric(df['temp'], errors='coerce')
+        df = df[(df['temp'] >= -50) & (df['temp'] <= 50)]
     
     return df
 
@@ -82,86 +82,47 @@ def project_bike_usage(df, feature_columns, target_column):
     return model
 
 # Chemin du répertoire
-data_directory = r"C:\Users\weyth\Downloads\Python-20250110\data"
+path = r"C:\Users\weyth\Downloads\Python-20250115"
+data_directory = r"C:\Users\weyth\Downloads\Python-20250115\data"
 
-# Charger les données \t for tab
-all_data_weather = open_all_files_in_directory(data_directory, "data_weather_2022-12-25", ',')
-all_data_bike = open_all_files_in_directory(data_directory, "data_bike_2022-12-25", '\t')
-# Filtrer les données pour garder uniquement "amiens" et "marseille"
-filtered_data_weather = filter_dataframes(all_data_weather, filter_column='name', filter_values=['Amiens','Marseille'])
-filtered_data_bike = filter_dataframes(all_data_bike, filter_column='name', filter_values=['Amiens','Marseille'])
+# lecture des fichiers de données
+bike_stations = open_file(os.path.join(path, "bike_station.txt"), "\t")
+all_data_bikes = open_all_files_in_directory(data_directory, "data_bike_2022-06-02", "\t")
 
-# Extract temperature and location data with validation
-temp_data = []
-for df in filtered_data_weather:
-    if all(col in df.columns for col in ['lon', 'lat', 'temp']):
-        df = df.dropna(subset=['lon', 'lat', 'temp'])
-        
-        for _, row in df.iterrows():
-            try:
-                lat = float(str(row['lat']).replace(',', '.'))
-                lon = float(str(row['lon']).replace(',', '.'))
-                temp = float(str(row['temp']).replace(',', '.'))
-                
-                if not (np.isnan(lat) or np.isnan(lon) or np.isnan(temp)):
-                    temp_data.append([lat, lon, temp])
-            except (ValueError, TypeError) as e:
-                continue
+# Copy the current header of all_data_bikes before replacing it
+current_headers = [df.columns.tolist() for df in all_data_bikes]
 
-# Calculate map center and normalize temperatures
-if temp_data:
-    temp_array = np.array(temp_data)
-    min_temp = np.min(temp_array[:, 2])
-    max_temp = np.max(temp_array[:, 2])
-    
-    # Normalize temperatures between 0 and 1
-    normalized_data = [[point[0], point[1], (point[2] - min_temp)/(max_temp - min_temp)] 
-                      for point in temp_data]
-    
-    map_center = [np.mean(temp_array[:, 0]), np.mean(temp_array[:, 1])]
-else:
-    map_center = [46.603354, 1.888334]
-    normalized_data = []
+# Replace the header of all_data_bikes with the correct one
+correct_header = ['city', 'station_id', 'request_date', 'answer_date', 'bike_available']
+all_data_bikes = [df.rename(columns=dict(zip(df.columns, correct_header))) for df in all_data_bikes]
 
-# Create map
-map = folium.Map(location=map_center, zoom_start=6)
+# Add the current headers as a new row in each dataframe
+for i, df in enumerate(all_data_bikes):
+    new_row = pd.DataFrame([current_headers[i]], columns=correct_header)
+    all_data_bikes[i] = pd.concat([new_row, df], ignore_index=True)
 
-# Add markers with color gradient based on temperature
-for lat, lon, temp in normalized_data:
-    # Create RGB color (red for high, green for low)
-    color = f'#{int(255 * ( temp)):02x}{int(255 * (1 - temp)):02x}00'
-    
-    folium.CircleMarker(
-        location=[lat, lon],
-        radius=10,
-        popup=f'Temperature: {temp * (max_temp - min_temp) + min_temp:.2f}°C',
-        color=color,
-        fill=True,
-        fillColor=color,
-        fillOpacity=0.7
-    ).add_to(map)
+# all_data_weather = open_all_files_in_directory(data_directory, "weather", ",")
 
-# Add white markers if no temperature data is present
-for df in filtered_data_weather:
-    if all(col in df.columns for col in ['lon', 'lat']) and 'temp' not in df.columns:
-        for _, row in df.iterrows():
-            try:
-                lat = float(str(row['lat']).replace(',', '.'))
-                lon = float(str(row['lon']).replace(',', '.'))
-                folium.CircleMarker(
-                    location=[lat, lon],
-                    radius=10,
-                    popup='No temperature data',
-                    color='white',
-                    fill=True,
-                    fillColor='white',
-                    fillOpacity=0.6
-                ).add_to(map)
-            except (ValueError, TypeError) as e:
-                continue
+# suppression des doublons
+bike_stations = bike_stations.drop_duplicates()
+filtered_data_bikes = [df.drop_duplicates() for df in all_data_bikes]
+# filtered_data_weather = [df.drop_duplicates() for df in all_data_weather]
 
-# Save the map to an HTML file
-map.save('temperature_gradient_map.html')
+# nettoyage des données
+cleaned_data_bikes = [clean_data(df) for df in filtered_data_bikes]
+# cleaned_data_weather = [clean_data(df) for df in filtered_data_weather]
 
-# Afficher les résultats
-print(filtered_data_weather)
+# Merge bike station data with bike data based on 'id'
+merged_data_bikes = []
+for df in cleaned_data_bikes:
+    if 'id' in bike_stations.columns and df.columns[1] in df.columns:
+        merged_df = pd.merge(df, bike_stations, left_on=df.columns[1], right_on='id')
+        merged_data_bikes.append(merged_df)
+    else:
+        print(f"Skipping merge for dataframe due to missing columns: {df.columns[1]} or 'id'")
+
+# Example of how to use the merged data
+for df in merged_data_bikes:
+    print(df)
+
+
