@@ -4,6 +4,7 @@ import os
 import folium
 from folium.plugins import HeatMap
 from sklearn.linear_model import LinearRegression
+from datetime import datetime
 
 def open_file(path, separator):
     try:
@@ -26,6 +27,21 @@ def open_all_files_in_directory(directory_path, name, separator):
             data = open_file(file_path, separator)
             all_data.append(data)
     return all_data
+
+def replace_headers_and_add_original(all_data, correct_header):
+    # Copy the current header of all_data_bikes before replacing it
+    current_headers = [df.columns.tolist() for df in all_data]
+
+    # Replace the header of all_data_bikes with the correct one
+    all_data = [df.rename(columns=dict(zip(df.columns, correct_header))) for df in all_data]
+
+    # Add the current headers as a new row in each dataframe
+    for i, df in enumerate(all_data):
+        new_row = pd.DataFrame([current_headers[i]], columns=correct_header)
+        all_data[i] = pd.concat([new_row, df], ignore_index=True)
+    
+    return all_data
+
 
 def filter_dataframes(dataframes, filter_column, filter_values):
     filtered_data_weather = []
@@ -81,28 +97,25 @@ def project_bike_usage(df, feature_columns, target_column):
     
     return model
 
+# Demander à l'utilisateur de spécifier l'heure (exemple: "2022-12-25 14:00:00")
+specified_time = "2022-06-02 20:00:00"
+specified_time = datetime.strptime(specified_time, '%Y-%m-%d %H:%M:%S')
+formatted_time = specified_time.strftime('%Y-%m-%dT%H')
+print(formatted_time)
+
+
 # Chemin du répertoire
 path = r"C:\Users\weyth\Downloads\Python-20250115"
 data_directory = r"C:\Users\weyth\Downloads\Python-20250115\data"
+correct_header_data_bikes = ['city', 'station_id', 'request_date', 'answer_date', 'bike_available']
 
 # lecture des fichiers de données
 bike_stations = open_file(os.path.join(path, "bike_station.txt"), "\t")
-all_data_bikes = open_all_files_in_directory(data_directory, "data_bike_2022-06-02T19", "\t")
+all_data_weather = open_all_files_in_directory(data_directory, f"data_weather_{formatted_time}", ',')
+all_data_bikes = open_all_files_in_directory(data_directory, f"data_bike_{formatted_time}", '\t')
 
-# Copy the current header of all_data_bikes before replacing it
-current_headers = [df.columns.tolist() for df in all_data_bikes]
-
-# Replace the header of all_data_bikes with the correct one
-correct_header = ['city', 'station_id', 'request_date', 'answer_date', 'bike_available']
-all_data_bikes = [df.rename(columns=dict(zip(df.columns, correct_header))) for df in all_data_bikes]
-
-# Add the current headers as a new row in each dataframe
-for i, df in enumerate(all_data_bikes):
-    new_row = pd.DataFrame([current_headers[i]], columns=correct_header)
-
-    all_data_bikes[i] = pd.concat([new_row, df], ignore_index=True)
-    
-all_data_weather = open_all_files_in_directory(data_directory, "weather", ",")
+# Replace headers and add original headers as a new row
+all_data_bikes = replace_headers_and_add_original(all_data_bikes, correct_header_data_bikes)
 
 # suppression des doublons
 bike_stations = bike_stations.drop_duplicates()
