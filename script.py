@@ -19,13 +19,13 @@ def open_file(path, separator):
     return data
 
 def open_all_files_in_directory(directory_path, name, separator):
-    all_data_weather = []
+    all_data = []
     for filename in os.listdir(directory_path):
         if filename.endswith(".txt") and name in filename:
             file_path = os.path.join(directory_path, filename)
             data = open_file(file_path, separator)
-            all_data_weather.append(data)
-    return all_data_weather
+            all_data.append(data)
+    return all_data
 
 def filter_dataframes(dataframes, filter_column, filter_values):
     filtered_data_weather = []
@@ -87,7 +87,7 @@ data_directory = r"C:\Users\weyth\Downloads\Python-20250115\data"
 
 # lecture des fichiers de données
 bike_stations = open_file(os.path.join(path, "bike_station.txt"), "\t")
-all_data_bikes = open_all_files_in_directory(data_directory, "data_bike_2022-06-02", "\t")
+all_data_bikes = open_all_files_in_directory(data_directory, "data_bike_2022-06-02T19", "\t")
 
 # Copy the current header of all_data_bikes before replacing it
 current_headers = [df.columns.tolist() for df in all_data_bikes]
@@ -99,18 +99,19 @@ all_data_bikes = [df.rename(columns=dict(zip(df.columns, correct_header))) for d
 # Add the current headers as a new row in each dataframe
 for i, df in enumerate(all_data_bikes):
     new_row = pd.DataFrame([current_headers[i]], columns=correct_header)
-    all_data_bikes[i] = pd.concat([new_row, df], ignore_index=True)
 
-# all_data_weather = open_all_files_in_directory(data_directory, "weather", ",")
+    all_data_bikes[i] = pd.concat([new_row, df], ignore_index=True)
+    
+all_data_weather = open_all_files_in_directory(data_directory, "weather", ",")
 
 # suppression des doublons
 bike_stations = bike_stations.drop_duplicates()
 filtered_data_bikes = [df.drop_duplicates() for df in all_data_bikes]
-# filtered_data_weather = [df.drop_duplicates() for df in all_data_weather]
+filtered_data_weather = [df.drop_duplicates() for df in all_data_weather]
 
 # nettoyage des données
 cleaned_data_bikes = [clean_data(df) for df in filtered_data_bikes]
-# cleaned_data_weather = [clean_data(df) for df in filtered_data_weather]
+cleaned_data_weather = [clean_data(df) for df in filtered_data_weather]
 
 # Merge bike station data with bike data based on 'id'
 merged_data_bikes = []
@@ -121,8 +122,57 @@ for df in cleaned_data_bikes:
     else:
         print(f"Skipping merge for dataframe due to missing columns: {df.columns[1]} or 'id'")
 
-# Example of how to use the merged data
-for df in merged_data_bikes:
-    print(df)
+        # Create a base map
+        m = folium.Map(location=[48.8566, 2.3522], zoom_start=5)  # Centered on France
 
+        # Add city markers with bike availability coloration
+        for df in merged_data_bikes:
+            for _, row in df.iterrows():
+                city = row['city']
+                station_id = row['station_id']
+                bike_available = row['bike_available']
+            
+            # Determine marker color based on bike availability
+            if bike_available > 10:
+                marker_color = 'blue'
+            elif bike_available > 5:
+                marker_color = 'purple'
+            else:
+                marker_color = 'red'
+            
+            # Add marker to the map
+            folium.Marker(
+                location=[row['latitude'], row['longitude']],
+                popup=f"City: {city}<br>Station ID: {station_id}<br>Bikes Available: {bike_available}",
+                icon=folium.Icon(color=marker_color)
+            ).add_to(m)
 
+        # Save the map to an HTML file
+        m.save('bike_availability_map.html')
+        # Create a base map
+        m = folium.Map(location=[48.8566, 2.3522], zoom_start=5)  # Centered on France
+
+        # Add city markers with bike availability coloration
+        for df in merged_data_bikes:
+            for _, row in df.iterrows():
+                city = row['city']
+                station_id = row['station_id']
+                bike_available = row['bike_available']
+                
+                # Determine marker color based on bike availability
+                if bike_available > 10:
+                    marker_color = 'blue'
+                elif bike_available > 5:
+                    marker_color = 'purple'
+                else:
+                    marker_color = 'red'
+                
+                # Add marker to the map
+                folium.Marker(
+                    location=[row['latitude'], row['longitude']],
+                    popup=f"City: {city}<br>Station ID: {station_id}<br>Bikes Available: {bike_available}",
+                    icon=folium.Icon(color=marker_color)
+                ).add_to(m)
+
+        # Save the map to an HTML file
+        m.save('bike_availability_map.html')
