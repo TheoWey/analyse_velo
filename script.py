@@ -1,8 +1,17 @@
 import numpy as np
 import pandas as pd
+
 import os
+from datetime import datetime
 import folium
 from folium.plugins import HeatMap
+
+# Demander à l'utilisateur de spécifier l'heure (exemple: "2022-12-25 14:00:00")
+specified_time = "2022-06-02 19:00:00"
+specified_time = datetime.strptime(specified_time, '%Y-%m-%d %H:%M:%S')
+formatted_time = specified_time.strftime('%Y-%m-%dT%H')
+print(formatted_time)
+
 
 def open_file(path, separator):
     try:
@@ -20,159 +29,110 @@ def open_file(path, separator):
     return data
 
 def open_all_files_in_directory(directory_path, name, separator):
-    all_data_weather = []
+    print(name)
+    all_data = []
     for filename in os.listdir(directory_path):
         if filename.endswith(".txt") and name in filename:
             file_path = os.path.join(directory_path, filename)
             data = open_file(file_path, separator)
-            all_data_weather.append(data)
-    return all_data_weather
+
+                
+            all_data.append(data)
+               
+    return all_data
+
+
 
 def filter_dataframes(dataframes, filter_column, filter_values):
-    filtered_data_weather = []
+    filtered_data = []
     for df in dataframes:
         if filter_column in df.columns:
             # Filtrer les lignes selon les valeurs spécifiées
             filtered_df = df[df[filter_column].isin(filter_values)]
-            filtered_data_weather.append(filtered_df)
-    return filtered_data_weather
+            filtered_data.append(filtered_df)
+    return filtered_data
+
+# Fonction pour obtenir les données de vélos à un moment donné
+def get_bike_count_at_time(bike_data_list, station_id, time):
+    """
+    bike_data_list : liste de DataFrames
+    station_id : ID de la station à chercher
+    time : heure spécifique pour obtenir les données
+    """
+    for bike_data in bike_data_list:  # Boucle sur chaque DataFrame    
+        # Convertir la colonne datetime en format datetime pour comparaison
+        bike_data.loc[:, 'datetime'] = pd.to_datetime(bike_data['datetime'], errors='coerce')  # Utilise 'coerce' pour gérer les erreurs de conversion
+        
+        # Filtrer les données pour la station et l'heure spécifiée
+        station_data = bike_data[(bike_data['id'] == station_id) & (bike_data['datetime'] == time)]
+        
+        if not station_data.empty:
+            return station_data.iloc[0]['bikes']  # Retourne le nombre de vélos trouvés
+
+    return None  # Si aucune donnée n'est trouvée dans tous les DataFrames
+
+
 
 # Chemin du répertoire
 data_directory = r"C:\Users\carra\Downloads\Python-20250115\data"
+data_station_directory =r"C:\Users\carra\Downloads\Python-20250115"
 
-# Charger les données \t for tab
-all_data_weather = open_all_files_in_directory(data_directory, "data_weather_2022-12-25", ',')
-all_data_bike = open_all_files_in_directory(data_directory, "data_bike_2022-12-25", '\t')
+# Charger les données \n for tab
+all_data_weather = open_all_files_in_directory(data_directory, f"data_weather_{formatted_time}", ',')
+all_data_bike = open_all_files_in_directory(data_directory, f"data_bike_{formatted_time}", '\t')
+all_data_station = open_all_files_in_directory(data_station_directory, "bike_station.txt", '\t')
+
+
+
 # Filtrer les données pour garder uniquement "amiens" et "marseille"
 filtered_data_weather = filter_dataframes(all_data_weather, filter_column='name', filter_values=['Amiens','Marseille'])
-filtered_data_bike = filter_dataframes(all_data_bike, filter_column='name', filter_values=['Amiens','Marseille'])
+filtered_data_bike = filter_dataframes(all_data_bike, filter_column='name', filter_values=['amiens','marseille'])
+filtered_data_station = filter_dataframes(all_data_station, filter_column='city', filter_values=['amiens','marseille'])
 
-# Extract temperature and location data with validation
-temp_data = []
-for df in filtered_data_weather:
-    if all(col in df.columns for col in ['lon', 'lat', 'temp']):
-        df = df.dropna(subset=['lon', 'lat', 'temp'])
-        
+normalized_data = []
+
+for df in filtered_data_station:
+    if all(col in df.columns for col in ['longitude', 'latitude']):
+        df = df.dropna(subset=['longitude', 'latitude'])
         for _, row in df.iterrows():
             try:
-                lat = float(str(row['lat']).replace(',', '.'))
-                lon = float(str(row['lon']).replace(',', '.'))
-                temp = float(str(row['temp']).replace(',', '.'))
-                
-                if not (np.isnan(lat) or np.isnan(lon) or np.isnan(temp)):
-                    temp_data.append([lat, lon, temp])
+                lat = float(str(row['latitude']).replace(',', '.'))
+                lon = float(str(row['longitude']).replace(',', '.'))
+                station_id = row['id']  # ID de la station
+                normalized_data.append([lat, lon, station_id])  # Ajouter l'ID à la liste
             except (ValueError, TypeError) as e:
-                continue
+                continue      
 
-# Calculate map center and normalize temperatures
-if temp_data:
-    temp_array = np.array(temp_data)
-    min_temp = np.min(temp_array[:, 2])
-    max_temp = np.max(temp_array[:, 2])
-    
-    # Normalize temperatures between 0 and 1
-    normalized_data = [[point[0], point[1], (point[2] - min_temp)/(max_temp - min_temp)] 
-                      for point in temp_data]
-    
-    map_center = [np.mean(temp_array[:, 0]), np.mean(temp_array[:, 1])]
-else:
-    map_center = [46.603354, 1.888334]
-    normalized_data = []
+
+
+
+map_center = [46.603354, 1.888334]
 
 # Create map
 map = folium.Map(location=map_center, zoom_start=6)
+print("filtered data bike")
+print(filtered_data_bike)
+# Add markers with color 
+for lat, lon, station_id in normalized_data :
+    # Appeler la fonction mise à jour pour récupérer le nombre de vélos
+    bike_count = get_bike_count_at_time(filtered_data_bike, station_id, specified_time)
 
-# Ajout d'un marker avec une icône personnalisée
-icone_maison = folium.CustomIcon(
-    icon_image=r"C:\Users\carra\Desktop\projet_python\analyse_velo\velo.png",  # Chemin local
-    # OU utilisez une URL web
-    # icon_image='https://exemple.com/image.png',
-    icon_size=(40, 40),  # Taille de l'icône (largeur, hauteur) en pixels
-    icon_anchor=(20, 40),  # Point d'ancrage (moitié de la largeur, hauteur totale)
-    popup_anchor=(0, -40)     # Taille de l'icône (largeur, hauteur)
-)
+    # Ajouter un marqueur pour chaque station
+    if bike_count is not None:
+        popup_text = f"Station ID: {station_id}<br>Vélos disponibles: {bike_count}"
+        color = "green" if bike_count > 5 else "orange" if bike_count > 0 else "red"
+    else:
+        popup_text = f"Station ID: {station_id}<br>Aucune donnée disponible"
+        color = "gray"
 
-# Add markers with color gradient based on temperature
-for lat, lon, temp in normalized_data:
-    # Create RGB color (red for high, green for low)
-    color = f'#{int(255 * ( temp)):02x}{int(255 * (1 - temp)):02x}00'
-    
-    folium.CircleMarker(
-        location=[lat, lon],
-        radius=temp * (max_temp - min_temp) + min_temp,
-        color='',                   # Pas de couleur pour le contour
-        weight=0,
-        fill=True,
-        fillColor=color,
-        fillOpacity=0.3
-    
-    ).add_to(map)
-    
     folium.Marker(
         location=[lat, lon],
-        popup=f'Temperature: {temp * (max_temp - min_temp) + min_temp:.2f}°C',
-        icon=icone_maison
-
-    
+        popup=popup_text,
+        icon=folium.Icon(icon="bicycle", prefix="fa", color=color)
     ).add_to(map)
-
-
-# Add white markers if no temperature data is present
-for df in filtered_data_weather:
-    if all(col in df.columns for col in ['lon', 'lat']) and 'temp' not in df.columns:
-        for _, row in df.iterrows():
-            try:
-                lat = float(str(row['lat']).replace(',', '.'))
-                lon = float(str(row['lon']).replace(',', '.'))
-                folium.CircleMarker(
-                    location=[lat, lon],
-                    radius=10,
-                    popup='No temperature data',
-                    color='white',
-                    fill=True,
-                    fillColor='white',
-                    fillOpacity=0.6
-                ).add_to(map)
-            except (ValueError, TypeError) as e:
-                continue
-
-=======
-# Add markers with color gradient based on temperature
-for lat, lon, temp in normalized_data:
-    # Create RGB color (red for high, green for low)
-    color = f'#{int(255 * ( temp)):02x}{int(255 * (1 - temp)):02x}00'
-    
-    folium.CircleMarker(
-        location=[lat, lon],
-        radius=10,
-        popup=f'Temperature: {temp * (max_temp - min_temp) + min_temp:.2f}°C',
-        color=color,
-        fill=True,
-        fillColor=color,
-        fillOpacity=0.7
-    ).add_to(map)
-
-# Add white markers if no temperature data is present
-for df in filtered_data_weather:
-    if all(col in df.columns for col in ['lon', 'lat']) and 'temp' not in df.columns:
-        for _, row in df.iterrows():
-            try:
-                lat = float(str(row['lat']).replace(',', '.'))
-                lon = float(str(row['lon']).replace(',', '.'))
-                folium.CircleMarker(
-                    location=[lat, lon],
-                    radius=10,
-                    popup='No temperature data',
-                    color='white',
-                    fill=True,
-                    fillColor='white',
-                    fillOpacity=0.6
-                ).add_to(map)
-            except (ValueError, TypeError) as e:
-                continue
 
 # Save the map to an HTML file
 map.save('temperature_gradient_map.html')
 
 # Afficher les résultats
-print(filtered_data_weather)
+print(filtered_data_station)
