@@ -223,3 +223,24 @@ cleaned_data_weather = [clean_data(df) for df in filtered_data_weather]
 
 # Call the function
 create_bike_station_map(filtered_data_station, filtered_data_bike, specified_time)
+
+
+# Analyse univariée
+univariate_results = univariate_analysis(cleaned_data_bikes[0], 'bikes')
+print(univariate_results)
+
+# unfunctial
+# # Analyse bivariée
+# bivariate_results = bivariate_analysis(cleaned_data_bikes[0], 'bikes', 'temp')
+# print(bivariate_results)
+
+# unfunctial
+# # Analyse de corrélation
+# correlation_results = correlation_analysis(cleaned_data_bikes[0], cleaned_data_weather[0], 'bikes', 'temp')
+# print(correlation_results)
+
+# unfunctial
+# # Analyse des données de vélos
+# peak_hours, weekdays_vs_weekends = analyze_bike_data(cleaned_data_bikes[0])
+# print(peak_hours)
+# print(weekdays_vs_weekends)
