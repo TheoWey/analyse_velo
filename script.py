@@ -269,7 +269,6 @@ erreur = [(stats['interval'][1] - stats['mean']) for stats in confidence_interva
 print("Months:", months)
 print("Means:", means)
 print("Errors:", erreur)
-"""
 # Afficher les résultats
 for month, stats in confidence_intervals.items():
     print(f"Mois {month}:")
