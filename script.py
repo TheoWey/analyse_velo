@@ -1,38 +1,26 @@
 import numpy as np
 import pandas as pd
 import os
+from datetime import datetime
 import folium
 from folium.plugins import HeatMap
 from sklearn.linear_model import LinearRegression
-from datetime import datetime
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 
-"""cette fonction ouvre tous les fichiers dans un répertoire spécifié qui 
-contiennent un nom spécifique et ont une extension .txt"""
-def open_all_files_in_directory(directory_path, name, separator):
-    # Création d'un DataFrame vide pour stocker les données
-    data = pd.DataFrame()
-
-"""cette fonction ouvre un fichier spécifié et retourne un DataFrame
-DataFrame = structure de données bidimensionnelle, genre tableau...etc
-mutable et hétérogène, avec des axes étiquetés (lignes et colonnes)."""
 def open_file(path, separator):
     try:
         # Lecture du fichier avec gestion des exceptions
         print(f"Reading file: {path}")
         data = pd.read_csv(filepath_or_buffer=path, sep=separator)
     except pd.errors.EmptyDataError:
-        # Si le fichier n'a pas de colonnes/ est vide, on retourne un dataFrame vide
         print(f"No columns to parse from file: {path}")
         return pd.DataFrame()
     except Exception as e:
-        # Si une autre erreur est detectée pendant la lecture du fichier, on l'affiche et on retourne un DataFrame vide
         print(f"Error reading file {path}: {e}")
         return pd.DataFrame()
     return data
 
-"""Cette fonction ouvre tous les fichiers dans un répertoire spécifié qui 
-contiennent un nom spécifique et ont une extension .txt"""
 def open_all_files_in_directory(directory_path, name, separator):
     all_data = []
     for filename in os.listdir(directory_path):
@@ -42,12 +30,11 @@ def open_all_files_in_directory(directory_path, name, separator):
             all_data.append(data)
     return all_data
 
- # Remplacer les en-têtes et ajouter les en-têtes originaux comme nouvelle ligne
 def replace_headers_and_add_original(all_data, correct_header):
-    # Copier l'en-tête actuel de all_data_bikes avant de le remplacer
+    # Copy the current header of all_data_bike before replacing it
     current_headers = [df.columns.tolist() for df in all_data]
 
-    # Replace the header of all_data_bikes with the correct one
+    # Replace the header of all_data_bike with the correct one
     all_data = [df.rename(columns=dict(zip(df.columns, correct_header))) for df in all_data]
 
     # Add the current headers as a new row in each dataframe
@@ -57,7 +44,6 @@ def replace_headers_and_add_original(all_data, correct_header):
     
     return all_data
 
-""" Là on va filtrer les dataframes selon les valeurs d'une colonne spécifique"""
 def filter_dataframes(dataframes, filter_column, filter_values):
     filtered_data_weather = []
     for df in dataframes:
@@ -68,225 +54,245 @@ def filter_dataframes(dataframes, filter_column, filter_values):
     return filtered_data_weather
 
 def clean_data(df):
-    # enlever les doublons
+    # Remove duplicates
     df = df.drop_duplicates()
     
-    # prendre en charge les valeurs manquantes (exemple: supprimer les lignes avec des valeurs manquantes)
-    df = df.dropna()  
-    # prendre en charge les valeurs aberrantes 
-    if 'temp' in df.columns:
-        df['temp'] = pd.to_numeric(df['temp'], errors='coerce') 	
-        df = df[(df['temp'] >= -50) & (df['temp'] <= 50)] 
-    # si il y a la colonne temp => convertir la colonne "temp" en numérique puis supprimer les valeurs aberrantes et retourner le dataframe
+    # Handle missing values
+    df = df.dropna()  # or use df.fillna() to fill missing values
     
-    return df 
+    # Handle outliers (example: removing rows where temperature is outside a reasonable range)
+    if 'temp' in df.columns:
+        df['temp'] = pd.to_numeric(df['temp'], errors='coerce')
+        df = df[(df['temp'] >= -50) & (df['temp'] <= 50)]
+    
+    return df
 
-# Analyse stat univariée
+def merge_bike_and_station_data(data_1, data_2, merge_key):
+    merged_data = []
+    for df in data_1:
+        for station_df in data_2:
+            if merge_key in station_df.columns and df.columns[1] in df.columns:
+                merged_df = pd.merge(df, station_df, left_on=df.columns[1], right_on=merge_key)
+                merged_data.append(merged_df)
+            else:
+                print(f"Skipping merge for dataframe due to missing columns: {df.columns[1]} or '{merge_key}'")
+    return merged_data
+
+# Fonction pour obtenir les données de vélos à un moment donné
+def get_bike_count_at_time(bike_data_list, station_id, time):
+    """
+    bike_data_list : liste de DataFrames
+    station_id : ID de la station à chercher
+    time : heure spécifique pour obtenir les données
+    """
+    for bike_data in bike_data_list:  # Boucle sur chaque DataFrame    
+        # Convertir la colonne datetime en format datetime pour comparaison
+        if 'datetime' in bike_data.columns:
+            bike_data.loc[:, 'datetime'] = pd.to_datetime(bike_data['datetime'], errors='coerce')  # Utilise 'coerce' pour gérer les erreurs de conversion
+        else:
+            continue
+        
+        # Filtrer les données pour la station et l'heure spécifiée
+        station_data = bike_data[(bike_data['id'] == station_id) & (bike_data['datetime'] == time)]
+        
+        if not station_data.empty:
+            return station_data.iloc[0]['bikes']  # Retourne le nombre de vélos trouvés
+
+    return None  # Si aucune donnée n'est trouvée dans tous les DataFrames
+
+def create_bike_station_map(filtered_data_station, filtered_data_bike, specified_time):
+    normalized_data = []
+    for df in filtered_data_station:
+        if all(col in df.columns for col in ['longitude', 'latitude']):
+            df = df.dropna(subset=['longitude', 'latitude'])
+            for _, row in df.iterrows():
+                try:
+                    lat = float(str(row['latitude']).replace(',', '.'))
+                    lon = float(str(row['longitude']).replace(',', '.'))
+                    station_id = row['id']  # ID de la station
+                    places = row['bike_stands']
+                    normalized_data.append([lat, lon, station_id, places])  # Ajouter l'ID à la liste
+                except (ValueError, TypeError) as e:
+                    continue      
+
+    map_center = [46.603354, 1.888334]
+
+    # Create map
+    map = folium.Map(location=map_center, zoom_start=6)
+    # Add markers with color 
+    for lat, lon, station_id, places in normalized_data:
+        # Appeler la fonction mise à jour pour récupérer le nombre de vélos
+        bike_count = get_bike_count_at_time(filtered_data_bike, station_id, specified_time)
+
+        # Ajouter un marqueur pour chaque station
+        if bike_count is not None:
+            # Calculer le pourcentage de vélos disponibles
+            percentage = (bike_count / int(places)) * 100
+
+            # Créer le code HTML pour le popup avec une barre de progression
+            popup_html = f"""
+            <div style="width: 200px;">
+                <h4>Station ID: {station_id}</h4>
+                <p>Vélos disponibles: {bike_count}/{int(places)}</p>
+                <div style="background-color: #e0e0e0; border-radius: 5px; padding: 2px;">
+                    <div style="width: {percentage}%; background-color: #76c7c0; height: 20px; border-radius: 5px;"></div>
+                </div>
+            </div>
+            """
+            color = "green" if bike_count > 5 else "orange" if bike_count > 0 else "red"
+        else:
+            popup_html = f"""
+            <div style="width: 200px;">
+                <h4>Station ID: {station_id}</h4>
+                <p>Aucune donnée disponible</p>
+            </div>
+            """
+            color = "gray"
+
+        folium.Marker(
+            location=[lat, lon],
+            popup=folium.Popup(popup_html, max_width=250),
+            icon=folium.Icon(icon="bicycle", prefix="fa", color=color)
+        ).add_to(map)
+
+    # Save the map to an HTML file
+    map.save('velo_map.html')
+
 def univariate_analysis(df, column):
     return df[column].describe()
 
-# Analyse stat bivariée
 def bivariate_analysis(df, column1, column2):
     return df[[column1, column2]].describe()
-# Analyse de corrélation (attention peut bugger)
+
 def correlation_analysis(df1, df2, column1, column2):
     merged_df = pd.merge(df1, df2, on='timestamp')
     correlation = merged_df[[column1, column2]].corr()
     return correlation
 
-# definir une fonction pour analyser les données de vélos
 def analyze_bike_data(df):
-    # regrouper les données par heure pour trouver les heures de pointe
+    # Example: Group by hour to analyze peak/off-peak hours
     df['hour'] = df['timestamp'].dt.hour
     peak_hours = df.groupby('hour').size()
     
-    # regrouper les données par jour de la semaine pour trouver les jours de la semaine les plus utilisés
+    # Example: Group by day of the week to analyze weekdays/weekends
     df['day_of_week'] = df['timestamp'].dt.dayofweek
     weekdays_vs_weekends = df.groupby('day_of_week').size()
     
     return peak_hours, weekdays_vs_weekends
 
-# definir une fonction pour projeter l'utilisation des vélos
 def project_bike_usage(df, feature_columns, target_column):
     X = df[feature_columns]
     y = df[target_column]
     
     model = LinearRegression()
     model.fit(X, y)
-    # tracé du modèle de regression linéaire     
+    
     return model
 
 # Demander à l'utilisateur de spécifier l'heure (exemple: "2022-12-25 14:00:00")
-specified_time = "2022-06-02 20:00:00"
-specified_time = datetime.strptime(specified_time, '%Y-%m-%d %H:%M:%S')
+specified_time = "2022-06-02 19:58"
+specified_time = datetime.strptime(specified_time, '%Y-%m-%d %H:%M')
 formatted_time = specified_time.strftime('%Y-%m-%dT%H')
-print(formatted_time)
-
 
 # Chemin du répertoire
-path = r"C:\Users\ingri\Documents\projectdata"
-data_directory = r"C:\Users\ingri\Documents\projectdata"
-correct_header_data_bikes = ['city', 'station_id', 'request_date', 'answer_date', 'bike_available']
+path = r"C:\Users\ingri\Downloads\data"
+data_directory = r"C:\Users\ingri\Downloads\data"
+correct_header_data_bikes = ['city', 'id', 'request_date', 'datetime', 'bikes']
 
 # lecture des fichiers de données
-bike_stations = open_file(os.path.join(path, "bike_station.txt"), "\t")
+all_data_station = open_all_files_in_directory(path, "bike_station.txt", '\t')
 all_data_weather = open_all_files_in_directory(data_directory, f"data_weather_{formatted_time}", ',')
-all_data_bikes = open_all_files_in_directory(data_directory, f"data_bike_{formatted_time}", '\t')
+all_data_bike = open_all_files_in_directory(data_directory, f"data_bike_{formatted_time}", '\t')
 
-# remplacer les en-têtes et ajouter les en-têtes originaux comme nouvelle ligne
-all_data_bikes = replace_headers_and_add_original(all_data_bikes, correct_header_data_bikes)
+# Replace headers and add original headers as a new row
+all_data_bike = replace_headers_and_add_original(all_data_bike, correct_header_data_bikes)
 
-# suppression des doublons
-bike_stations = bike_stations.drop_duplicates()
-filtered_data_bikes = [df.drop_duplicates() for df in all_data_bikes]
+# selection par ville
+filtered_data_station = filter_dataframes(all_data_station, filter_column='city', filter_values=['amiens','marseille'])
+filtered_data_bike = filter_dataframes(all_data_bike, filter_column='city', filter_values=['amiens','marseille'])
 filtered_data_weather = [df.drop_duplicates() for df in all_data_weather]
 
+#suppression des doublons
+filtered_data_station = [df.drop_duplicates() for df in filtered_data_station]
+filtered_data_bike = [df.drop_duplicates() for df in filtered_data_bike]
+filtered_data_weather = [df.drop_duplicates() for df in filtered_data_weather]
+
 # nettoyage des données
-cleaned_data_bikes = [clean_data(df) for df in filtered_data_bikes]
+cleaned_data_bikes = [clean_data(df) for df in filtered_data_bike]
 cleaned_data_weather = [clean_data(df) for df in filtered_data_weather]
+# Créer la carte des stations de vélos
+create_bike_station_map(filtered_data_station, filtered_data_bike, specified_time)
 
-# fusionner les données de vélos avec les données des stations de vélos
-merged_data_bikes = []
-for df in cleaned_data_bikes:
-    if 'id' in bike_stations.columns and df.columns[1] in df.columns:
-        merged_df = pd.merge(df, bike_stations, left_on=df.columns[1], right_on='id')
-        merged_data_bikes.append(merged_df)
-    else:
-        print(f"Skipping merge for dataframe due to missing columns: {df.columns[1]} or 'id'")
+#////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-        # Create a base map
-        m = folium.Map(location=[48.8566, 2.3522], zoom_start=5)  # Centered on France
+if filtered_data_weather:
+    weather_df = pd.concat(filtered_data_weather, ignore_index=True)
+else:
+    print("Aucun DataFrame à concaténer dans filtered_data_weather.")
 
-        # Add city markers with bike availability coloration
-        for df in merged_data_bikes:
-            for _, row in df.iterrows():
-                city = row['city']
-                station_id = row['station_id']
-                bike_available = row['bike_available']
-            
-            # Determine marker color based on bike availability
-            if bike_available > 10:
-                marker_color = 'blue'
-            elif bike_available > 5:
-                marker_color = 'purple'
-            else:
-                marker_color = 'red'
-            
-            # Add marker to the map
-            folium.Marker(
-                location=[row['latitude'], row['longitude']],
-                popup=f"City: {city}<br>Station ID: {station_id}<br>Bikes Available: {bike_available}",
-                icon=folium.Icon(color=marker_color)
-            ).add_to(m)
+# Analyse des données météorologiques
+weather_df = pd.concat(filtered_data_weather, ignore_index=True)
 
-        # Save the map to an HTML file
-        m.save('bike_availability_map.html')
-        # Create a base map
-        m = folium.Map(location=[48.8566, 2.3522], zoom_start=5)  # Centered on France
+# Vérifier si la colonne 'humidity' existe, sinon la créer avec des valeurs NaN
+if 'humidity' not in weather_df.columns:
+    weather_df['humidity'] = np.nan
 
-        # Add city markers with bike availability coloration
-        for df in merged_data_bikes:
-            for _, row in df.iterrows():
-                city = row['city']
-                station_id = row['station_id']
-                bike_available = row['bike_available']
-                
-                # Determine marker color based on bike availability
-                if bike_available > 10:
-                    marker_color = 'blue'
-                elif bike_available > 5:
-                    marker_color = 'purple'
-                else:
-                    marker_color = 'red'
-                
-                # Add marker to the map
-                folium.Marker(
-                    location=[row['latitude'], row['longitude']],
-                    popup=f"City: {city}<br>Station ID: {station_id}<br>Bikes Available: {bike_available}",
-                    icon=folium.Icon(color=marker_color)
-                ).add_to(m)
+# Analyse univariée
+univariate_temp = univariate_analysis(weather_df, 'temp')
+univariate_humidity = univariate_analysis(weather_df, 'humidity')
 
-        # Save the map to an HTML file
-        m.save('bike_availability_map.html')
+# Analyse bivariée
+bivariate_temp_humidity = bivariate_analysis(weather_df, 'temp', 'humidity')
 
-
-# Vérifier si merged_data_bikes est une liste
-if isinstance(merged_data_bikes, list):
-    # Concaténer la liste si elle contient des DataFrames
-    merged_data_bikes = pd.concat(merged_data_bikes, ignore_index=True)
-
-# Vérifier que merged_data_bikes est maintenant un DataFrame
-if not isinstance(merged_data_bikes, pd.DataFrame):
-    raise ValueError("merged_data_bikes doit être un DataFrame après concaténation.")
-
-# Vérifier si la colonne 'timestamp' existe
-if 'request_date' not in merged_data_bikes.columns:
-    raise KeyError("'request_date' column is missing from merged_data_bikes")
-
-# Convertir les dates en format datetime si ce n'est pas déjà fait
-merged_data_bikes['request_date'] = pd.to_datetime(merged_data_bikes['request_date'], errors='coerce')
-
-# Supprimer les lignes avec des valeurs NaT dans 'request_date'
-merged_data_bikes = merged_data_bikes.dropna(subset=['request_date'])
-
-# Filtrer les données pour obtenir celles à 9h
-merged_data_bikes['hour'] = merged_data_bikes['request_date'].dt.hour
-merged_data_bikes['month'] = merged_data_bikes['request_date'].dt.month
-filtered_data = merged_data_bikes[merged_data_bikes['hour'] == 9]
-
-# Vérifier les données filtrées
-print("Filtered Data:")
-print(filtered_data['city', 'bike_available', 'hour', 'month'].head())
-
-# Calcul des statistiques de base pour chaque mois
-confidence_intervals = {}
-for month, group in filtered_data.groupby('month'):
-    print(f"Processing month: {month}")
-    mean_bikes = group['bike_available'].mean()
-    std_bikes = group['bike_available'].std()
-    n = len(group)
-
-    # Calcul de l'intervalle de confiance à 95%
-    alpha = 0.05
-    t_value = t.ppf(1 - alpha / 2, df=n - 1) if n > 1 else 0
-    marge_erreur = t_value * (std_bikes / np.sqrt(n)) if n > 1 else 0
-
-    confidence_interval = (mean_bikes - marge_erreur, mean_bikes + marge_erreur)
-    confidence_intervals[month] = {
-        'mean': mean_bikes,
-        'std': std_bikes,
-        'n': n,
-        'interval': confidence_interval
-    }
-
-
-# Préparer les données pour la representation graphique
-months = list(confidence_intervals.keys())
-means = [stats['mean'] for stats in confidence_intervals.values()]
-erreur = [(stats['interval'][1] - stats['mean']) for stats in confidence_intervals.values()]
-
-# Vérifier les données pour le graphique
-print("Months:", months)
-print("Means:", means)
-print("Errors:", erreur)
-# Afficher les résultats
-for month, stats in confidence_intervals.items():
-    print(f"Mois {month}:")
-    print(f"  Moyenne: {stats['mean']:.2f}")
-    print(f"  Écart-Type: {stats['std']:.2f}")
-    print(f"  Taille de l'échantillon: {stats['n']}")
-    print(f"  Intervalle de Confiance: {stats['interval']}")
-    print("-")
-
-# Créer le graphique
+# Générer des graphiques
 plt.figure(figsize=(10, 6))
-plt.bar(months, means, yerr=errors, capsize=5, color='skyblue', alpha=0.7)
-plt.xlabel('Mois')
-plt.ylabel('Nombre moyen de vélos disponibles')
-plt.title('Nombre moyen de vélos disponibles à 9h avec intervalle de confiance à 95%')
-plt.xticks(months)
-plt.grid(axis='y', linestyle='--', alpha=0.7)
+plt.hist(weather_df['temp'].dropna(), bins=30, edgecolor='k', alpha=0.7)
+plt.title('Distribution de la température')
+plt.xlabel('Température (°C)')
+plt.ylabel('Fréquence')
+plt.savefig('temp_distribution.png')
+plt.close()
 
-# Afficher le graphique
-plt.show()
-"""
+plt.figure(figsize=(10, 6))
+plt.scatter(weather_df['temp'], weather_df['humidity'], alpha=0.5)
+plt.title('Température vs Humidité')
+plt.xlabel('Température (°C)')
+plt.ylabel('Humidité (%)')
+plt.savefig('temp_vs_humidity.png')
+plt.close()
+# Analyse des données de pollution
+pollution_files = open_all_files_in_directory(data_directory, "data_pollution_", ',')
+pollution_df_list = [clean_data(df) for df in pollution_files]
+
+# Analyse univariée des données de pollution
+univariate_pollution = {}
+for df in pollution_df_list:
+    for col in df.columns:
+        if col not in ['id', 'date']:
+            if col not in univariate_pollution:
+                univariate_pollution[col] = []
+            univariate_pollution[col].append(univariate_analysis(df, col))
+
+# Analyse bivariée des données de pollution (exemple: NO2 vs PM10)
+bivariate_pollution = []
+for df in pollution_df_list:
+    if 'NO2' in df.columns and 'PM10' in df.columns:
+        bivariate_pollution.append(bivariate_analysis(df, 'NO2', 'PM10'))
+
+# Générer des graphiques pour les données de pollution
+for i, df in enumerate(pollution_df_list):
+    plt.figure(figsize=(10, 6))
+    plt.hist(df['NO2'].dropna(), bins=30, edgecolor='k', alpha=0.7)
+    plt.title(f'Distribution de NO2 - Fichier {i+1}')
+    plt.xlabel('NO2 (µg/m³)')
+    plt.ylabel('Fréquence')
+    plt.savefig(f'no2_distribution_{i+1}.png')
+    plt.close()
+
+    plt.figure(figsize=(10, 6))
+    plt.scatter(df['NO2'], df['PM10'], alpha=0.5)
+    plt.title(f'NO2 vs PM10 - Fichier {i+1}')
+    plt.xlabel('NO2 (µg/m³)')
+    plt.ylabel('PM10 (µg/m³)')
+    plt.savefig(f'no2_vs_pm10_{i+1}.png')
+    plt.close()
