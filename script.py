@@ -1,7 +1,10 @@
 import numpy as np
 import pandas as pd
 import os
+import mpld3
+from mpld3 import plugins
 from datetime import datetime
+import seaborn as sns  # pour la heatmap et les boxplots
 import folium
 from folium.plugins import HeatMap
 from sklearn.linear_model import LinearRegression
@@ -224,75 +227,156 @@ cleaned_data_weather = [clean_data(df) for df in filtered_data_weather]
 create_bike_station_map(filtered_data_station, filtered_data_bike, specified_time)
 
 #////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+# Fusionner les DataFrames de données vélo en un seul DataFrame
+bike_df = open_file(r"C:\Users\ingri\Documents\analyse_velo\merged_data_bikes.txt", '\t')
+print(bike_df.head())
+# Conversion de la colonne 'request_date' en datetime
+bike_df['request_date'] = pd.to_datetime(bike_df['request_date'])
 
-if filtered_data_weather:
-    weather_df = pd.concat(filtered_data_weather, ignore_index=True)
-else:
-    print("Aucun DataFrame à concaténer dans filtered_data_weather.")
+# Création de colonnes supplémentaires pour l'analyse
+bike_df['year'] = bike_df['request_date'].dt.year
+bike_df['month'] = bike_df['request_date'].dt.month
+bike_df['day'] = bike_df['request_date'].dt.day
+bike_df['hour'] = bike_df['request_date'].dt.hour
+bike_df['day_of_week'] = bike_df['request_date'].dt.dayofweek  # 0 = lundi, 6 = dimanche
+bike_df['time'] = bike_df['request_date'].dt.time
 
-# Analyse des données météorologiques
-weather_df = pd.concat(filtered_data_weather, ignore_index=True)
+timeday= bike_df['request_date']
+year= bike_df['year']
+month= bike_df['month']
+day= bike_df['day']
+hour= bike_df['hour']
+weekday= bike_df['day_of_week']
+time= bike_df['time']
 
-# Vérifier si la colonne 'humidity' existe, sinon la créer avec des valeurs NaN
-if 'humidity' not in weather_df.columns:
-    weather_df['humidity'] = np.nan
+def get_season(month):
+    if month in [12, 1, 2]:
+        return "Hiver"
+    elif month in [3, 4, 5]:
+        return "Printemps"
+    elif month in [6, 7, 8]:
+        return "Été"
+    else:
+        return "Automne"
 
-# Analyse univariée
-univariate_temp = univariate_analysis(weather_df, 'temp')
-univariate_humidity = univariate_analysis(weather_df, 'humidity')
+bike_df['season'] = bike_df['month'].apply(get_season)
+bike_df['periode_jour_nuit'] = bike_df['hour'].apply(lambda h: "Jour" if 6 <= h < 18 else "Nuit")
+bike_df['weekday_weekend'] = bike_df['day_of_week'].apply(lambda d: "Weekend" if d >= 5 else "Weekday")
+bike_df['peak_offpeak'] = bike_df['hour'].apply(lambda h: "Heures de Pointe" if (7 <= h < 9 or 17 <= h < 19) else "Heures Creuses")
 
-# Analyse bivariée
-bivariate_temp_humidity = bivariate_analysis(weather_df, 'temp', 'humidity')
+season= bike_df['season']
+daynight= bike_df['periode_jour_nuit']
+weekday_weekend= bike_df['weekday_weekend']
+peak_offpeak= bike_df['peak_offpeak']
 
-# Générer des graphiques
-plt.figure(figsize=(10, 6))
-plt.hist(weather_df['temp'].dropna(), bins=30, edgecolor='k', alpha=0.7)
-plt.title('Distribution de la température')
-plt.xlabel('Température (°C)')
-plt.ylabel('Fréquence')
-plt.savefig('temp_distribution.png')
-plt.close()
+city_x = bike_df["city_x"]
+station_id = bike_df["station_id"]
+request_date = bike_df["request_date"]
+answer_date = bike_df["answer_date"]
+bike_available = bike_df["bike_available"]
+name = bike_df["name"]
+address = bike_df["address"]
+banking = bike_df["banking"]
+bonus = bike_df["bonus"]
+bike_stands = bike_df["bike_stands"]
+available_bike_stands = bike_df["available_bike_stands"]
+available_bikes = bike_df["available_bikes"]
+status = bike_df["status"]
+last_update = bike_df["last_update"]
+city_y = bike_df["city_y"]
+id_ = bike_df["id"]
+company = bike_df["company"]
+latitude = bike_df["latitude"]
+longitude = bike_df["longitude"]
+altitude = bike_df["altitude"]
+id_pollution = bike_df["id_pollution"]
+dist_bike_pollution = bike_df["dist_bike_pollution"]
 
-plt.figure(figsize=(10, 6))
-plt.scatter(weather_df['temp'], weather_df['humidity'], alpha=0.5)
-plt.title('Température vs Humidité')
-plt.xlabel('Température (°C)')
-plt.ylabel('Humidité (%)')
-plt.savefig('temp_vs_humidity.png')
-plt.close()
-# Analyse des données de pollution
-pollution_files = open_all_files_in_directory(data_directory, "data_pollution_", ',')
-pollution_df_list = [clean_data(df) for df in pollution_files]
+print(longitude)
+def save_fig_jpg(fig, filename):
+    fig.savefig(filename, format='jpg')
 
-# Analyse univariée des données de pollution
-univariate_pollution = {}
-for df in pollution_df_list:
-    for col in df.columns:
-        if col not in ['id', 'date']:
-            if col not in univariate_pollution:
-                univariate_pollution[col] = []
-            univariate_pollution[col].append(univariate_analysis(df, col))
+# Style des graphes
+sns.set_style("whitegrid")
 
-# Analyse bivariée des données de pollution (exemple: NO2 vs PM10)
-bivariate_pollution = []
-for df in pollution_df_list:
-    if 'NO2' in df.columns and 'PM10' in df.columns:
-        bivariate_pollution.append(bivariate_analysis(df, 'NO2', 'PM10'))
+# Utilisation des vélos par mois
+plt.figure(figsize=(12,6))
+for month in range(1, 13):
+    monthly_data = bike_df[bike_df['month'] == month]
+    plt.plot(monthly_data['hour'], monthly_data['bike_available'], label=f'Mois {month}')
+plt.xlabel("Heure")
+plt.ylabel("Nombre de vélos disponibles")
+plt.title("Évolution de l'utilisation des vélos par mois")
+plt.legend(title="Mois")
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.savefig("utilisation_velos_par_mois.jpg")
 
-# Générer des graphiques pour les données de pollution
-for i, df in enumerate(pollution_df_list):
-    plt.figure(figsize=(10, 6))
-    plt.hist(df['NO2'].dropna(), bins=30, edgecolor='k', alpha=0.7)
-    plt.title(f'Distribution de NO2 - Fichier {i+1}')
-    plt.xlabel('NO2 (µg/m³)')
-    plt.ylabel('Fréquence')
-    plt.savefig(f'no2_distribution_{i+1}.png')
-    plt.close()
+# Distribution Jour vs Nuit
+plt.figure(figsize=(8,6))
+sns.countplot(x=daynight, order=["Jour", "Nuit"], palette=["skyblue", "navy"])
+plt.title("Distribution des vélos disponibles - Jour vs Nuit")
+plt.xlabel("Période")
+plt.ylabel("Nombre d'enregistrements")
+plt.tight_layout()
+save_fig_jpg(plt.gcf(), "jour_nuit.jpg")
 
-    plt.figure(figsize=(10, 6))
-    plt.scatter(df['NO2'], df['PM10'], alpha=0.5)
-    plt.title(f'NO2 vs PM10 - Fichier {i+1}')
-    plt.xlabel('NO2 (µg/m³)')
-    plt.ylabel('PM10 (µg/m³)')
-    plt.savefig(f'no2_vs_pm10_{i+1}.png')
-    plt.close()
+# Distribution Semaine vs Week-end
+plt.figure(figsize=(8,6))
+sns.countplot(x=weekday_weekend, order=["Weekday", "Weekend"], palette=["green", "red"])
+plt.title("Distribution des vélos disponibles - Semaine vs Week-end")
+plt.xlabel("Période")
+plt.ylabel("Nombre d'enregistrements")
+plt.tight_layout()
+save_fig_jpg(plt.gcf(), "semaine_weekend.jpg")
+
+# Heures de Pointe vs Heures Creuses
+plt.figure(figsize=(8,6))
+sns.countplot(x=peak_offpeak, order=["Heures de Pointe", "Heures Creuses"], palette=["orange", "gray"])
+plt.title("Disponibilité des vélos - Heures de Pointe vs Heures Creuses")
+plt.xlabel("Période")
+plt.ylabel("Nombre d'enregistrements")
+plt.tight_layout()
+save_fig_jpg(plt.gcf(), "heures_pointe.jpg")
+
+# Répartition par Saison
+plt.figure(figsize=(8,6))
+order = ["Hiver", "Printemps", "Été", "Automne"]
+sns.countplot(x=season, order=order, palette=["blue", "green", "orange", "brown"])
+plt.title("Répartition des vélos disponibles selon la saison")
+plt.xlabel("Saison")
+plt.ylabel("Nombre d'enregistrements")
+plt.tight_layout()
+save_fig_jpg(plt.gcf(), "saison.jpg")
+
+# Utilisation moyenne par Station
+plt.figure(figsize=(12,6))
+station_usage = bike_df.groupby("station_id")["bike_available"].mean().reset_index()
+sns.barplot(x="station_id", y="bike_available", data=station_usage, palette="viridis")
+plt.title("Nombre moyen de vélos disponibles par station")
+plt.xlabel("Station")
+plt.ylabel("Nombre moyen de vélos")
+plt.xticks(rotation=90)
+plt.tight_layout()
+save_fig_jpg(plt.gcf(), "station.jpg")
+
+# Comparaison de l'utilisation entre les Villes
+plt.figure(figsize=(8,6))
+city_usage = bike_df.groupby("city_x")["bike_available"].mean().reset_index()
+sns.barplot(x="city_x", y="bike_available", data=city_usage, palette="coolwarm")
+plt.title("Comparaison de l'utilisation des vélos entre villes")
+plt.xlabel("Ville")
+plt.ylabel("Nombre moyen de vélos")
+plt.tight_layout()
+save_fig_jpg(plt.gcf(), "ville.jpg")
+
+# Analyse des stations avec le plus de vélos disponibles
+plt.figure(figsize=(12,6))
+top_stations = station_usage.sort_values(by="bike_available", ascending=False).head(10)
+sns.barplot(x="station_id", y="bike_available", data=top_stations, palette="magma")
+plt.title("Top 10 des stations avec le plus de vélos disponibles")
+plt.xlabel("Station")
+plt.ylabel("Nombre moyen de vélos")
+plt.xticks(rotation=90)
+plt.tight_layout()
+save_fig_jpg(plt.gcf(), "top_stations.jpg")
