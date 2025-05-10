@@ -13,9 +13,11 @@ import os
 from datetime import datetime
 import folium
 from folium.plugins import HeatMap
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import train_test_split, KFold
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, accuracy_score, confusion_matrix, classification_report
+from sklearn.preprocessing import StandardScaler
 from scipy.stats import linregress
 from typing import List, Optional, Tuple
 import pandas as pd
@@ -501,3 +503,313 @@ class DataTools:
         plt.title("Correlation Matrix")
         plt.tight_layout()
         plt.show()
+
+    @staticmethod
+    def predict_bike_usage(
+        usage_data: pd.DataFrame,
+        weather_data: pd.DataFrame = None,
+        pollution_data: pd.DataFrame = None,
+        target_col: str = "total_bikes_used",
+        threshold: float = None,
+        test_size: float = 0.2,
+        random_state: int = 42,
+    ) -> dict:
+        """
+        Predict bike usage based on historical data and optional weather/pollution factors.
+        
+        Args:
+            usage_data (pd.DataFrame): DataFrame with bike usage data (must contain 'date' and target_col)
+            weather_data (pd.DataFrame, optional): DataFrame with weather data
+            pollution_data (pd.DataFrame, optional): DataFrame with pollution data
+            target_col (str): Column name for the bike usage to predict
+            threshold (float, optional): Threshold to classify high vs. low usage days
+            test_size (float): Proportion of test data for model evaluation
+            random_state (int): Random seed for reproducibility
+            
+        Returns:
+            dict: Results of the analysis including models and performance metrics
+        """
+        print("Starting bike usage prediction analysis...")
+        
+        # Prepare the dataset by merging usage with weather and pollution data if provided
+        df = usage_data.copy()
+        
+        # Ensure date column is datetime
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'])
+            
+        features = []
+        
+        # Add weather data if provided
+        if isinstance(weather_data, pd.DataFrame) and not weather_data.empty:
+            weather_data = weather_data.copy()
+            # Check and create date column from various time columns
+            if 'request_time' in weather_data.columns:
+                weather_data['date'] = pd.to_datetime(weather_data['request_time']).dt.date
+            elif 'datetime' in weather_data.columns:
+                weather_data['date'] = pd.to_datetime(weather_data['datetime']).dt.date
+            elif 'date' in weather_data.columns:
+                weather_data['date'] = pd.to_datetime(weather_data['date'])
+            else:
+                print("Warning: No date column found in weather_data. Skipping weather data.")
+                weather_data = None
+                
+            # Only merge if date column was created successfully
+        # Add pollution data if provided
+        if isinstance(pollution_data, pd.DataFrame) and not pollution_data.empty:
+            pollution_data = pollution_data.copy()
+            # Check and create date column from various time columns
+            if 'date' not in pollution_data.columns and 'datetime' in pollution_data.columns:
+                pollution_data['date'] = pd.to_datetime(pollution_data['datetime']).dt.date
+            elif 'date' in pollution_data.columns:
+                pollution_data['date'] = pd.to_datetime(pollution_data['date'])
+            else:
+                print("Warning: No date column found in pollution_data. Skipping pollution data.")
+                pollution_data = None
+                
+            # Only merge if date column was created successfully
+            if pollution_data is not None and 'date' in pollution_data.columns:
+                # Convert to datetime object (not datetime.date) for proper merging
+                pollution_data['date'] = pd.to_datetime(pollution_data['date'])
+                df['date'] = pd.to_datetime(df['date'])
+                
+                # Merge with usage data
+                df = pd.merge(df, pollution_data, on='date', how='left')
+                features.extend(['NO', 'NO2', 'NOX as NO2', 'O3', 'PM10', 'PM2.5'])
+                features = [f for f in features if f in df.columns]
+            pollution_data = pollution_data.copy()
+            if 'date' not in pollution_data.columns and 'datetime' in pollution_data.columns:
+                pollution_data['date'] = pd.to_datetime(pollution_data['datetime']).dt.date
+            elif 'date' in pollution_data.columns:
+                pollution_data['date'] = pd.to_datetime(pollution_data['date'])
+                
+            # Merge with usage data
+            df = pd.merge(df, pollution_data, on='date', how='left')
+            features.extend(['NO', 'NO2', 'NOX as NO2', 'O3', 'PM10', 'PM2.5'])
+            features = [f for f in features if f in df.columns]
+        
+        # Add day of week, month as features
+        df['day_of_week'] = df['date'].dt.dayofweek
+        df['month'] = df['date'].dt.month
+        df['is_weekend'] = df['day_of_week'].apply(lambda x: 1 if x >= 5 else 0)
+        
+        features.extend(['day_of_week', 'month', 'is_weekend'])
+        
+        # Drop rows with missing values
+        df = df.dropna(subset=[target_col] + features)
+        
+        if len(df) < 10:
+            print(f"Error: Not enough data points after cleaning. Only {len(df)} rows available.")
+            return {}
+            
+        print(f"Dataset prepared with {len(df)} rows and features: {features}")
+        
+        # Create classification target if threshold provided
+        if threshold is not None:
+            classification_col = 'high_usage'
+            df[classification_col] = False
+            df.loc[df[target_col] >= threshold, classification_col] = True
+            
+            # Print statistics
+            percentage_high = (df[classification_col].mean()) * 100
+            nb_high = df[classification_col].sum()
+            nb_low = len(df) - nb_high
+            
+            print(f"High usage statistics:")
+            print(f"- Percentage of high usage days: {percentage_high:.2f}%")
+            print(f"- Number of high usage days: {nb_high}")
+            print(f"- Number of low usage days: {nb_low}")
+        
+        # Create usage categories based on quantiles
+        quantiles = df[target_col].quantile([0.33, 0.66])
+        cat_col = f"{target_col}_category"
+        df[cat_col] = pd.cut(
+            df[target_col], 
+            bins=(-np.inf, quantiles[0.33], quantiles[0.66], np.inf), 
+            labels=['low', 'medium', 'high']
+        )
+        
+        results = {}
+        
+        # 1. Regression model for predicting exact usage
+        try:
+            X = df[features]
+            y = df[target_col]
+            
+            # Split data
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=test_size, random_state=random_state
+            )
+            
+            # Scale features
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            
+            # Train regression model
+            reg_model = LinearRegression()
+            reg_model.fit(X_train_scaled, y_train)
+            
+            # Evaluate regression model
+            y_pred = reg_model.predict(X_test_scaled)
+            mae = mean_absolute_error(y_test, y_pred)
+            mse = mean_squared_error(y_test, y_pred)
+            rmse = np.sqrt(mse)
+            r2 = r2_score(y_test, y_pred)
+            
+            print(f"\nRegression Model Results:")
+            print(f"- Mean Absolute Error: {mae:.2f}")
+            print(f"- Root Mean Squared Error: {rmse:.2f}")
+            print(f"- R² Score: {r2:.4f}")
+            
+            results['regression'] = {
+                'model': reg_model,
+                'mae': mae,
+                'rmse': rmse,
+                'r2': r2,
+                'scaler': scaler,
+                'features': features
+            }
+            
+            # Visualize regression results
+            import matplotlib as mpl
+            mpl.rcParams['agg.path.chunksize'] = 10000  # Increase chunk size for plotting
+
+            plt.figure(figsize=(12, 6))
+            # Use the test indices to get corresponding dates from the original dataframe
+            test_indices = y_test.index
+            test_dates = df.iloc[test_indices]['date']
+
+            # If there are too many points, sample them for plotting
+            if len(test_dates) > 1000:
+                sample_size = min(1000, len(test_dates))
+                sample_indices = np.random.choice(len(test_dates), sample_size, replace=False)
+                sample_dates = test_dates.iloc[sample_indices]
+                sample_y_test = y_test.iloc[sample_indices]
+                sample_y_pred = y_pred[sample_indices]
+                plt.scatter(sample_dates, sample_y_test, label='Actual Usage', marker='o')
+                plt.scatter(sample_dates, sample_y_pred, label='Predicted Usage', marker='x')
+            else:
+                plt.scatter(test_dates, y_test, label='Actual Usage', marker='o')
+                plt.scatter(test_dates, y_pred, label='Predicted Usage', marker='x')
+                
+            plt.xlabel('Date/Time')
+            plt.ylabel('Usage')
+            plt.title('Actual vs Predicted Usage Over Time')
+            plt.legend()
+            plt.tight_layout()
+            plt.show()
+            
+            # 2. Classification model if threshold provided
+            if threshold is not None:
+                X = df[features]
+                y = df[classification_col]
+                
+                # Split data
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=test_size, random_state=random_state
+                )
+                
+                # Scale features
+                X_train_scaled = scaler.fit_transform(X_train)
+                X_test_scaled = scaler.transform(X_test)
+                
+                # Train classification model
+                log_model = LogisticRegression(max_iter=1000, random_state=random_state)
+                log_model.fit(X_train_scaled, y_train)
+                
+                # Evaluate classification model
+                y_pred = log_model.predict(X_test_scaled)
+                accuracy = accuracy_score(y_test, y_pred)
+                conf_matrix = confusion_matrix(y_test, y_pred)
+                class_report = classification_report(y_test, y_pred)
+                
+                print(f"\nBinary Classification Model (High vs. Low Usage):")
+                print(f"- Accuracy: {accuracy:.2f}")
+                print("- Confusion Matrix:")
+                print(conf_matrix)
+                
+                results['classification'] = {
+                    'model': log_model,
+                    'accuracy': accuracy,
+                    'confusion_matrix': conf_matrix,
+                    'classification_report': class_report
+                }
+                
+                # Plot confusion matrix
+                plt.figure(figsize=(8, 6))
+                sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues',
+                            xticklabels=['Low Usage', 'High Usage'],
+                            yticklabels=['Low Usage', 'High Usage'])
+                plt.title('Confusion Matrix for Usage Classification')
+                plt.xlabel('Predicted Label')
+                plt.ylabel('True Label')
+                plt.tight_layout()
+                plt.show()
+                
+            # 3. Category prediction model (low, medium, high)
+            X = df[features]
+            y = df[cat_col]
+            
+            # Split data
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=test_size, random_state=random_state
+            )
+            
+            # Scale features
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            
+            # Train KNN model
+            knn_model = KNeighborsClassifier(n_neighbors=5)
+            knn_model.fit(X_train_scaled, y_train)
+            
+            # Evaluate KNN model
+            y_pred = knn_model.predict(X_test_scaled)
+            cat_accuracy = accuracy_score(y_test, y_pred)
+            cat_conf_matrix = confusion_matrix(y_test, y_pred)
+            cat_report = classification_report(y_test, y_pred)
+            
+            print(f"\nCategory Classification Model (Low/Medium/High):")
+            print(f"- Accuracy: {cat_accuracy:.2f}")
+            print("- Confusion Matrix:")
+            print(cat_conf_matrix)
+            
+            results['category_classification'] = {
+                'model': knn_model,
+                'accuracy': cat_accuracy,
+                'confusion_matrix': cat_conf_matrix,
+                'classification_report': cat_report
+            }
+            
+            # Plot category confusion matrix
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(cat_conf_matrix, annot=True, fmt='d', cmap='Blues',
+                        xticklabels=['Low', 'Medium', 'High'],
+                        yticklabels=['Low', 'Medium', 'High'])
+            plt.title('Confusion Matrix for Usage Category Classification')
+            plt.xlabel('Predicted Label')
+            plt.ylabel('True Label')
+            plt.tight_layout()
+            plt.show()
+            
+            # Time series plot of actual vs predicted
+            plt.figure(figsize=(14, 6))
+            test_dates = df.iloc[y_test.index]['date']
+            plt.plot(test_dates, y_test.values, label='Actual Usage', marker='o', alpha=0.5)
+            plt.plot(test_dates, y_pred, label='Predicted Usage', marker='x', alpha=0.5)
+            plt.title('Time Series of Actual vs Predicted Bike Usage')
+            plt.xlabel('Date')
+            plt.ylabel('Bike Usage')
+            plt.legend()
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            plt.show()
+            
+            return results
+            
+        except Exception as e:
+            print(f"Error during model training/evaluation: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'error': str(e)}

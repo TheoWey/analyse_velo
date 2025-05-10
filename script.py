@@ -13,7 +13,7 @@ def main():
     # Ask the user to specify the time (example: "2022-12-25 14:00:00")
     specified_time = "2022-11-29 10:00"
     specified_time = datetime.strptime(specified_time, "%Y-%m-%d %H:%M")
-    formatted_time = specified_time.strftime("%Y")
+    formatted_time = specified_time.strftime("%Y-%m")
 
     # Directory path
     path = r"..\data_files"
@@ -121,28 +121,109 @@ def main():
 
 
 
-    # Correlation analysis for dailyuse_amiens
-    DataTools.corr_analysis(
-        [dailyuse_amiens, data_weather.data],
-        ["total_bikes_used", ["temp", "temp_max", "temp_min", "humidity", "speed", "clouds"]],
+    # # Correlation analysis for dailyuse_amiens
+    # DataTools.corr_analysis(
+    #     [dailyuse_amiens, data_weather.data],
+    #     ["total_bikes_used", ["temp", "temp_max", "temp_min", "humidity", "speed", "clouds"]],
+    # )
+
+    # DataTools.corr_analysis(
+    #     [dailyuse_amiens, data_pollution.data],
+    #     ["total_bikes_used", ["NO", "NO2", "NOX as NO2", "O3", "PM10", "PM2.5"]],
+    # )
+
+    # # Correlation analysis for dailyuse_marseille
+    # DataTools.corr_analysis(
+    #     [dailyuse_marseille, data_weather.data],
+    #     ["total_bikes_used", ["temp", "temp_max", "temp_min", "humidity", "speed", "clouds"]],
+    # )
+
+    # DataTools.corr_analysis(
+    #     [dailyuse_marseille, data_pollution.data],
+    #     ["total_bikes_used", ["NO", "NO2", "NOX as NO2", "O3", "PM10", "PM2.5"]],
+    # )
+
+    results = DataTools.predict_bike_usage(
+        usage_data=dailyuse_amiens, 
+        weather_data=data_weather.data,
+        pollution_data=data_pollution.data,
+        threshold=100 # Optional: value above which usage is considered "high"
     )
 
-    DataTools.corr_analysis(
-        [dailyuse_amiens, data_pollution.data],
-        ["total_bikes_used", ["NO", "NO2", "NOX as NO2", "O3", "PM10", "PM2.5"]],
-    )
+    # After calling predict_bike_usage, add the following code to use the results:
 
-    # Correlation analysis for dailyuse_marseille
-    DataTools.corr_analysis(
-        [dailyuse_marseille, data_weather.data],
-        ["total_bikes_used", ["temp", "temp_max", "temp_min", "humidity", "speed", "clouds"]],
-    )
-
-    DataTools.corr_analysis(
-        [dailyuse_marseille, data_pollution.data],
-        ["total_bikes_used", ["NO", "NO2", "NOX as NO2", "O3", "PM10", "PM2.5"]],
-    )
-
+    # Check if the prediction was successful
+    if results and 'error' not in results:
+        print("\n===== USING PREDICTION RESULTS =====")
+        
+        # 1. Access the regression model metrics
+        if 'regression' in results:
+            reg_metrics = results['regression']
+            print(f"Regression model R² score: {reg_metrics['r2']:.4f}")
+            print(f"RMSE: {reg_metrics['rmse']:.2f} bikes")
+            
+            # Make a prediction with the regression model for a new data point
+            # Example: predict bike usage for a specific set of features
+            new_data = pd.DataFrame({
+                'day_of_week': [0],  # Monday
+                'month': [6],        # June
+                'is_weekend': [0],   # Not weekend
+                'temp': [25],        # 25°C
+                'humidity': [50]     # 50% humidity
+                # Add other features as needed
+            })
+            
+            # Make sure to use only the features that the model was trained on
+            missing_cols = set(reg_metrics['features']) - set(new_data.columns)
+            for col in missing_cols:
+                new_data[col] = 0  # Fill missing columns with default values
+                
+            new_data = new_data[reg_metrics['features']]  # Reorder columns
+            
+            # Scale the data using the same scaler used for training
+            scaled_data = reg_metrics['scaler'].transform(new_data)
+            
+            # Make prediction
+            predicted_usage = reg_metrics['model'].predict(scaled_data)[0]
+            print(f"Predicted bike usage for a 25°C Monday in June: {predicted_usage:.0f} bikes")
+        
+        # 2. Use the classification model for high/low usage prediction
+        if 'classification' in results:
+            print("\nBinary classification performance:")
+            print(f"Accuracy: {results['classification']['accuracy']:.2f}")
+            
+            # You could predict if usage will be high or low for new data
+            if reg_metrics and 'model' in results['classification']:
+                high_usage = results['classification']['model'].predict(scaled_data)[0]
+                print(f"High usage day? {'Yes' if high_usage else 'No'}")
+        
+        # 3. Use the category classification model
+        if 'category_classification' in results:
+            print("\nCategory classification performance:")
+            print(f"Accuracy: {results['category_classification']['accuracy']:.2f}")
+            
+            # Predict usage category (low/medium/high) for new data
+            if reg_metrics and 'model' in results['category_classification']:
+                category = results['category_classification']['model'].predict(scaled_data)[0]
+                print(f"Usage category: {category}")
+        
+        # 4. You could save the models for future use
+        import pickle
+        
+        # Save regression model
+        if 'regression' in results:
+            with open('bike_usage_regression_model.pkl', 'wb') as f:
+                pickle.dump({
+                    'model': results['regression']['model'],
+                    'scaler': results['regression']['scaler'],
+                    'features': results['regression']['features']
+                }, f)
+            print("\nRegression model saved to 'bike_usage_regression_model.pkl'")
+            
+        print("\n===== END OF RESULTS USAGE =====")
+    else:
+        print("Prediction failed or returned no results.")
+    
 if __name__ == "__main__":
     try:
         main()
