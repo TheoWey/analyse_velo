@@ -6,6 +6,8 @@
 ##############################################
 
 import pandas as pd
+from tqdm import tqdm
+import time
 
 
 class Data:
@@ -43,35 +45,46 @@ class Data:
             print(f"An error occurred: {e}")
 
     def __clean_data(self):
-        # Remove duplicates
-        # Keep rows with unique combinations of all columns except 'id'
-        # Handle missing values
-        self.data.drop_duplicates()
-        self.data = self.data.fillna(
-            0
-        )  # Fill missing values with 0, you can change this to a more appropriate value or method
-        # Drop columns with specific names
-        values_to_drop = [
-            "request_time",
-            "lon",
-            "lat",
-            "weather_id",
-            "weather_ma",
-        ]
-        # Drop columns that match the values_to_drop list
-        columns_to_drop = [
-            col for col in self.data.columns if col in values_to_drop
-        ]
-        if columns_to_drop:
-            self.data = self.data.drop(columns=columns_to_drop)
-        # Handle outliers (example: removing rows where temperature is outside a reasonable range)
-        if "temp" in self.data.columns:
-            self.data["temp"] = pd.to_numeric(
-                self.data["temp"], errors="coerce"
-            )
-            self.data = self.data[
-                (self.data["temp"] >= -50) & (self.data["temp"] <= 50)
-            ]
+        
+        print("Cleaning data...")
+        steps = ["Removing duplicates", "Filling missing values", "Dropping columns", "Handling outliers"]
+        
+        for i, step in enumerate(tqdm(steps, desc="Data cleaning")):
+            if step == "Removing duplicates":
+                self.data.drop_duplicates()
+                time.sleep(0.1)  # Small delay to show progress
+            
+            elif step == "Filling missing values":
+                self.data = self.data.fillna(0)  # Fill missing values with 0
+                time.sleep(0.1)
+                
+            elif step == "Dropping columns":
+                values_to_drop = [
+                    "request_time",
+                    "lon",
+                    "lat",
+                    "weather_id",
+                    "weather_ma",
+                ]
+                # Drop columns that match the values_to_drop list
+                columns_to_drop = [
+                    col for col in self.data.columns if col in values_to_drop
+                ]
+                if columns_to_drop:
+                    self.data = self.data.drop(columns=columns_to_drop)
+                time.sleep(0.1)
+                
+            elif step == "Handling outliers":
+                if "temp" in self.data.columns:
+                    self.data["temp"] = pd.to_numeric(
+                        self.data["temp"], errors="coerce"
+                    )
+                    self.data = self.data[
+                        (self.data["temp"] >= -50) & (self.data["temp"] <= 50)
+                    ]
+                time.sleep(0.1)
+        
+        print("Data cleaning completed!")
 
     def filter_dataframes(self, filter_column, filter_values):
         if filter_column in self.data.columns:

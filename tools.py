@@ -21,6 +21,7 @@ from typing import List, Optional, Tuple
 import pandas as pd
 import datetime as dt
 from data import Data
+from tqdm import tqdm
 
 
 class DataTools:
@@ -44,6 +45,7 @@ class DataTools:
         Returns:
             List[pd.DataFrame]: A list of pandas DataFrames containing the data from the matched files.
         """
+        
         if time:
             print(
                 f"Opening files containing '{name}' in directory: {directory_path} at {time}"
@@ -53,32 +55,33 @@ class DataTools:
                 f"Opening files containing '{name}' in directory: {directory_path}"
             )
         try:
-            # Retrieve files in the directory
+            # Get matching filenames first
+            matching_files = [
+                filename for filename in os.listdir(directory_path)
+                if filename.endswith(file_extension) and name in filename and time in filename
+            ]
+            
+            # Initialize progress bar
             files = []
-            for filename in os.listdir(directory_path):
-                if (
-                    filename.endswith(file_extension)
-                    and name in filename
-                    and time in filename
-                ):
-                    try:
-                        file = pd.read_csv(
-                            os.path.join(directory_path, filename),
-                            sep=separator,
-                            encoding="utf-8",
-                            on_bad_lines="skip",
-                        )
-                        string_columns = file.select_dtypes(["object"]).columns
-                        file[string_columns] = (
-                            file[string_columns]
-                            .astype(str)
-                            .apply(lambda x: x.str.replace(",", "."))
-                        )
-                        files.append(file)
-                    except pd.errors.ParserError:
-                        print(f"Error parsing file: {filename}")
-                    except pd.errors.EmptyDataError:
-                        print(f"No columns to parse from file: {filename}")
+            for filename in tqdm(matching_files, desc="Loading files"):
+                try:
+                    file = pd.read_csv(
+                        os.path.join(directory_path, filename),
+                        sep=separator,
+                        encoding="utf-8",
+                        on_bad_lines="skip",
+                    )
+                    string_columns = file.select_dtypes(["object"]).columns
+                    file[string_columns] = (
+                        file[string_columns]
+                        .astype(str)
+                        .apply(lambda x: x.str.replace(",", "."))
+                    )
+                    files.append(file)
+                except pd.errors.ParserError:
+                    print(f"Error parsing file: {filename}")
+                except pd.errors.EmptyDataError:
+                    continue
         except FileNotFoundError:
             print(f"Directory not found: {directory_path}")
             return []
@@ -99,7 +102,9 @@ class DataTools:
         Returns:
             list: A list of dataframes with the correct header.
         """
-        for i in range(len(data)):
+        
+        print("Renaming headers...")
+        for i in tqdm(range(len(data)), desc="Renaming headers"):
             # Copy the current header of all_data_bike before replacing it
             current_headers = [data[i].columns.tolist()]
             # Replace the header of all_data_bike with the correct one
@@ -135,9 +140,18 @@ class DataTools:
         Returns:
             pd.DataFrame: The merged DataFrame.
         """
+        
+        print("Merging dataframes...")
+        # Create a progress bar with steps
+        progress = tqdm(total=4, desc="Merge progress")
+        
         # Ensure the keys are of the same type and format
         data1[key1] = data1[key1].astype(str)
+        progress.update(1)
+        
         data2[key2] = data2[key2].astype(str)
+        progress.update(1)
+        
         selected_columns = [key2] + key3
         merged_data = pd.merge(
             data1,
@@ -146,38 +160,43 @@ class DataTools:
             right_on=key2,
             how="left",
         )
+        progress.update(1)
+        
         # Check for NaN values in the merged data for key3 columns
         nan_rows = merged_data[merged_data[key3].isna().any(axis=1)]
-        if not nan_rows.empty:
-            if debug_statement:
-                print(f"Found {len(nan_rows)} rows with NaN values in {key3}")
+        if not nan_rows.empty and debug_statement:
+            print(f"Found {len(nan_rows)} rows with NaN values in {key3}")
 
-                # Get the key1 values that have NaN in key3 columns
-                nan_keys = nan_rows[key1].unique().tolist()
-                print(f"Missing data for {key1} values: {nan_keys}")
+            # Get the key1 values that have NaN in key3 columns
+            nan_keys = nan_rows[key1].unique().tolist()
+            print(f"Missing data for {key1} values: {nan_keys}")
 
-                # Look up these values in the original data2
-                for missing_key in nan_keys:
-                    # Check if the missing key exists exactly in data2
-                    exact_matches = data2[data2[key2] == missing_key]
-                    if not exact_matches.empty:
-                        print(
-                            f"Found exact matches in data2 for {missing_key}, but merge failed:"
-                        )
-                        print(exact_matches[selected_columns])
+            # Look up these values in the original data2
+            for missing_key in nan_keys:
+                # Check if the missing key exists exactly in data2
+                exact_matches = data2[data2[key2] == missing_key]
+                if not exact_matches.empty:
+                    print(
+                        f"Found exact matches in data2 for {missing_key}, but merge failed:"
+                    )
+                    print(exact_matches[selected_columns])
 
-                    # Try to find similar matches (case insensitive or partial)
-                    potential_matches = data2[
-                        data2[key2]
-                        .astype(str)
-                        .str.contains(missing_key, na=False, case=False)
-                    ]
-                    if not potential_matches.empty:
-                        print(
-                            f"Found potential matches in data2 for {missing_key}:"
-                        )
-                        print(potential_matches[selected_columns])
-
+                # Try to find similar matches (case insensitive or partial)
+                potential_matches = data2[
+                    data2[key2]
+                    .astype(str)
+                    .str.contains(missing_key, na=False, case=False)
+                ]
+                if not potential_matches.empty:
+                    print(
+                        f"Found potential matches in data2 for {missing_key}:"
+                    )
+                    print(potential_matches[selected_columns])
+        
+        progress.update(1)
+        progress.close()
+        print("Merge complete!")
+        
         return merged_data
 
     @staticmethod
@@ -302,40 +321,6 @@ class DataTools:
         bike_map.save("velo_map.html")
 
     @staticmethod
-    def corr_analysis(*args: any):
-        """
-        Perform a correlation analysis between two datasets and display the correlation matrix.
-        Args:
-            *args: Variable length argument list containing the datasets and columns to extract.
-        """
-        datas, columns_to_extract = args
-
-        # Extraire la colonne 'total_bikes' de 'velo'
-        if columns_to_extract["data1"] not in datas[0].columns:
-            raise KeyError(
-                f"Column '{columns_to_extract['data1']}' not found in the first dataset."
-            )
-        data_1 = datas[0][columns_to_extract["data1"]]
-        # Reshaper la colonne pour s'assurer que l'index est bien aligné
-        data_1 = data_1.reset_index(drop=True)
-
-        data_2 = DataTools.extract_monthly_data(data=datas[1])
-        data_2 = data_2[columns_to_extract["data2"]]
-        corr_analys = pd.concat([data_1, data_2], axis=1)
-        corr_analys = corr_analys.apply(pd.to_numeric, errors="coerce")
-        df_numerique = corr_analys.select_dtypes(include=["float64", "int64"])
-
-        # Calculer la matrice de corrélation
-        corr_matrix = df_numerique.corr()
-
-        # Afficher la matrice de corrélation avec seaborn
-        plt.figure(figsize=(10, 8))  # Taille de la figure
-        sns.heatmap(
-            corr_matrix, annot=True, cmap="coolwarm", fmt=".2f", linewidths=0.5
-        )
-        plt.title("Matrice de Corrélation")
-
-    @staticmethod
     def calculate_use(data: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Calculate the daily use of bikes based on the number of bikes available.
@@ -395,7 +380,7 @@ class DataTools:
             bikes_used = (
                 data_copy.groupby("id")["bikes_used"].sum().reset_index()
             )
-            bikes_used.columns = ["id", "used_bikes"]
+            bikes_used.columns = ["id", "bikes_used"]
 
             # get total bike used per hour of the day
             # Convert hour to string format for grouping
@@ -409,7 +394,7 @@ class DataTools:
                 .sum()
                 .reset_index()
             )
-            bikes_used_per_hour.columns = ["date", "hour", "used_bikes"]
+            bikes_used_per_hour.columns = ["date", "hour", "bikes_used"]
 
             return daily_use, bikes_used, bikes_used_per_hour
 
@@ -417,9 +402,31 @@ class DataTools:
             print(f"An error occurred in calculate_use: {e}")
             # Return empty DataFrames with the expected structure
             return pd.DataFrame(
-                columns=["date", "total_bikes_used"]
-            ), pd.DataFrame(columns=["id", "used_bikes"])
+                columns=["date", "total_used_bikes"]
+            ), pd.DataFrame(columns=["id", "bikes_used"])
         # upgrade calculate_use to return the use by period : morning, afternoon, evening, night, total use on day, month, year, season (spring, summer, autumn, winter) and the total use of the period
+
+    @staticmethod
+    def extract_monthly_data(data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Convert the provided data to monthly aggregates.
+        If a 'date' column is missing but a 'datetime' (or 'time') column exists,
+        or if the index is a DatetimeIndex, use it to build a 'date' column.
+        """
+        if "date" not in data.columns:
+            if "datetime" in data.columns:
+                data["date"] = pd.to_datetime(data["datetime"], errors="coerce").dt.date
+            elif "time" in data.columns:
+                data["date"] = pd.to_datetime(data["time"], errors="coerce").dt.date
+            elif isinstance(data.index, pd.DatetimeIndex):
+                data["date"] = data.index.date
+            else:
+                raise KeyError("Neither 'date', 'datetime', nor 'time' columns are present in the data.")
+        data["date"] = pd.to_datetime(data["date"], errors="coerce")
+        data = data.dropna(subset=["date"])
+        data_monthly = data.groupby(data["date"].dt.to_period("M")).sum().reset_index()
+        data_monthly["date"] = data_monthly["date"].dt.to_timestamp()
+        return data_monthly
 
     @staticmethod
     def plot_usage(
@@ -442,5 +449,55 @@ class DataTools:
         plt.legend()
         plt.grid(True, linestyle="--", alpha=0.7)
         plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.show()
+
+    @staticmethod
+    def corr_analysis(data: list[pd.DataFrame], columns_to_extract: list) -> None:
+        """
+        Perform a correlation analysis between two datasets and display the correlation matrix.
+        Args:
+            data (list[pd.DataFrame]): A list containing two DataFrames
+            columns_to_extract (list): A list containing column names to use from each dataset.
+                First element can be a string or list of strings for the first dataset.
+                Second element can be a string or list of strings for the second dataset.
+                e.g. ["total_bikes_used", ["temp", "humidity"]]
+        """
+        # The first dataset is used as is
+        df1 = data[0]
+        cols1 = columns_to_extract[0] if isinstance(columns_to_extract[0], list) else [columns_to_extract[0]]
+        
+        for col in cols1:
+            if col not in df1.columns:
+                raise KeyError(f"Column '{col}' not found in the first dataset.")
+        
+        # The second dataset is used as is (no monthly aggregation)
+        df2 = data[1]
+        cols2 = columns_to_extract[1] if isinstance(columns_to_extract[1], list) else [columns_to_extract[1]]
+        
+        for col in cols2:
+            if col not in df2.columns:
+                raise KeyError(f"Column '{col}' not found in the second dataset.")
+        
+        # Extract and reset indices for both dataframes
+        df1_selected = df1[cols1].reset_index(drop=True)
+        df2_selected = df2[cols2].reset_index(drop=True)
+        
+        # Find the minimum length of both dataframes to avoid index mismatches
+        min_len = min(len(df1_selected), len(df2_selected))
+        df1_selected = df1_selected[:min_len]
+        df2_selected = df2_selected[:min_len]
+        
+        # Concatenate and convert to numeric
+        combined = pd.concat([df1_selected, df2_selected], axis=1)
+        combined = combined.apply(pd.to_numeric, errors="coerce")
+        
+        # Compute correlation
+        corr_matrix = combined.corr()
+        
+        # Plot correlation heatmap
+        plt.figure(figsize=(12, 10))
+        sns.heatmap(corr_matrix, annot=True, cmap="coolwarm", fmt=".2f", linewidths=0.5)
+        plt.title("Correlation Matrix")
         plt.tight_layout()
         plt.show()

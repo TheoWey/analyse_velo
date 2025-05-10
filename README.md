@@ -13,4 +13,5 @@ pip install folium
 pip install scikit-learn
 pip install matplotlib
 pip install seaborn
+from tqdm import tqdm
 ```

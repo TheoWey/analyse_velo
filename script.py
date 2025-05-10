@@ -6,13 +6,14 @@ from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 import seaborn as sns
 import gc
+import traceback
 
 
 def main():
     # Ask the user to specify the time (example: "2022-12-25 14:00:00")
-    specified_time = "2022-06-02 10:00"
+    specified_time = "2022-11-29 10:00"
     specified_time = datetime.strptime(specified_time, "%Y-%m-%d %H:%M")
-    formatted_time = specified_time.strftime("%Y-%m")
+    formatted_time = specified_time.strftime("%Y")
 
     # Directory path
     path = r"..\data_files"
@@ -50,7 +51,7 @@ def main():
     )
     data_weather = Data()
     data_weather.get_data(weather_data)
-    data_weather.filter_dataframes("name", ["Amiens"])
+    data_weather.filter_dataframes("name", ["Amiens", "Marseille"])
     del weather_data
 
     # read pollution data
@@ -100,11 +101,9 @@ def main():
     del pollution_station
     del bike_station
 
-    # Calculate the number of bikes available in Amiens and Marseille
+        # Calculate the number of bikes available in Amiens and Marseille
     bike_count_amiens = DataTools.calul_capacity(data_bike.data, "amiens")
-    bike_count_marseille = DataTools.calul_capacity(
-        data_bike.data, "marseille"
-    )
+    bike_count_marseille = DataTools.calul_capacity(data_bike.data, "marseille")
 
     print(f"Number of slots in Amiens: {bike_count_amiens}")
     print(f"Number of slots in Marseille: {bike_count_marseille}")
@@ -120,54 +119,29 @@ def main():
         )
     )
 
-    # print(f"\nHourly use in Amiens: \n{useperhour_marseille}")
-    # print(f"\nDaily use in Amiens: \n{dailyuse_amiens}")
-    # print(f"Bike use on the period {formatted_time} : \n{period_use_amiens}")
 
-    # print(f"\nDaily use in Marseille: \n{dailyuse_marseille}")
-    # print(f"Bike use on the period {formatted_time} : \n{period_use_marseille}")
 
-    # Plot daily use for both cities
-    DataTools.plot_usage(
-        [dailyuse_amiens["date"], dailyuse_marseille["date"]],
-        [dailyuse_amiens["used_bikes"], dailyuse_marseille["used_bikes"]],
-        ["Amiens", "Marseille"],
-        "Daily Bike Usage Comparison",
-        "Date",
-        "Number of Bikes Used",
+    # Correlation analysis for dailyuse_amiens
+    DataTools.corr_analysis(
+        [dailyuse_amiens, data_weather.data],
+        ["total_bikes_used", ["temp", "temp_max", "temp_min", "humidity", "speed", "clouds"]],
     )
 
-    # Plot hourly use for a single day
-    # Choose a specific date from the dataset
-    # Make sure date column is a datetime type
-    if not pd.api.types.is_datetime64_any_dtype(useperhour_amiens["date"]):
-        useperhour_amiens["date"] = pd.to_datetime(useperhour_amiens["date"])
-    if not pd.api.types.is_datetime64_any_dtype(useperhour_marseille["date"]):
-        useperhour_marseille["date"] = pd.to_datetime(
-            useperhour_marseille["date"]
-        )
-
-    specific_date = useperhour_amiens["date"].dt.date.iloc[
-        0
-    ]  # Use the first date in the dataset
-
-    # Filter data for the specific date
-    amiens_day = useperhour_amiens[
-        useperhour_amiens["date"].dt.date == specific_date
-    ]
-    marseille_day = useperhour_marseille[
-        useperhour_marseille["date"].dt.date == specific_date
-    ]
-
-    DataTools.plot_usage(
-        [amiens_day["hour"], marseille_day["hour"]],
-        [amiens_day["used_bikes"], marseille_day["used_bikes"]],
-        ["Amiens", "Marseille"],
-        f"Hourly Bike Usage Comparison ({specific_date})",
-        "Hour",
-        "Number of Bikes Used",
+    DataTools.corr_analysis(
+        [dailyuse_amiens, data_pollution.data],
+        ["total_bikes_used", ["NO", "NO2", "NOX as NO2", "O3", "PM10", "PM2.5"]],
     )
 
+    # Correlation analysis for dailyuse_marseille
+    DataTools.corr_analysis(
+        [dailyuse_marseille, data_weather.data],
+        ["total_bikes_used", ["temp", "temp_max", "temp_min", "humidity", "speed", "clouds"]],
+    )
+
+    DataTools.corr_analysis(
+        [dailyuse_marseille, data_pollution.data],
+        ["total_bikes_used", ["NO", "NO2", "NOX as NO2", "O3", "PM10", "PM2.5"]],
+    )
 
 if __name__ == "__main__":
     try:
@@ -177,3 +151,8 @@ if __name__ == "__main__":
         print("Program completed successfully. Memory freed.")
     except Exception as e:
         print(f"An error occurred: {e}")
+        gc.collect()
+        traceback.print_exc()
+    except KeyboardInterrupt:
+        print("Program interrupted by user.")
+        gc.collect()
