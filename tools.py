@@ -10,6 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+import requests
 from datetime import datetime
 import folium
 from folium.plugins import HeatMap
@@ -290,11 +291,14 @@ class DataTools:
                 bike_data_list, station_id, specified_time
             )
             if bike_count is not None:
-                percentage = (bike_count / int(places)) * 100
+                # Convert bike_count to float before division
+                bike_count = float(bike_count)
+                places_int = int(places)
+                percentage = (bike_count / places_int) * 100
                 popup_html = f"""
                 <div style="width: 200px;">
                     <h4>Station ID: {station_id}</h4>
-                    <p>Vélos disponibles: {bike_count}/{int(places)}</p>
+                    <p>Vélos disponibles: {int(bike_count)}/{places_int}</p>
                     <div style="background-color: #e0e0e0; border-radius: 5px; padding: 2px;">
                         <div style="width: {percentage}%; background-color: #76c7c0; height: 20px; border-radius: 5px;"></div>
                     </div>
@@ -813,3 +817,101 @@ class DataTools:
             import traceback
             traceback.print_exc()
             return {'error': str(e)}
+        
+    @staticmethod
+    def get_api_data(url, api_key):
+        headers = {"Accept": "application/json"}
+        params = {"apiKey": api_key}
+
+        try:
+            response = requests.get(url, headers=headers, params=params)
+            response.raise_for_status()  # Lève une exception pour les codes d'erreur HTTP
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Erreur lors de la requête : {e}")
+            return None
+        
+    @staticmethod
+    def get_station_names(api_key, contract_name):
+        url = "https://api.jcdecaux.com/vls/v3/stations"
+        headers = {"Accept": "application/json"}
+        params = {"apiKey": api_key, "contract": contract_name}
+
+        try:
+            response = requests.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            stations = response.json()
+            station_data = {station["number"]: station["name"] for station in stations}
+            print(f"Stations pour {contract_name}: {station_data}")
+            return station_data
+        except requests.exceptions.RequestException as e:
+            print(f"Erreur lors de la requête pour {contract_name}: {e}")
+            return None
+
+    @staticmethod
+    def get_station_details(api_key, contract_name, station_number):
+        url = f"https://api.jcdecaux.com/vls/v3/stations/{station_number}"
+        headers = {"Accept": "application/json"}
+        params = {"apiKey": api_key, "contract": contract_name}
+
+        try:
+            response = requests.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            station_info = response.json()
+            return station_info
+        except requests.exceptions.RequestException as e:
+            print(f"Erreur lors de la requête pour la station {station_number} de {contract_name}: {e}")
+            return None
+    @staticmethod
+    def save_station_data_to_xlsx(station_data, contract_name, api_key, date_str):
+        # Nom du fichier
+        filename = f"databike_{contract_name}_{date_str}.xlsx"
+
+        # Créer le dossier "real_data" s'il n'existe pas
+        os.makedirs("real_data", exist_ok=True)
+
+        # Chemin complet du fichier
+        filepath = os.path.join("real_data", filename)
+
+        # Liste des colonnes attendues
+        headers = [
+            "station_number", "station_name", "available_bikes", 
+            "available_bike_stands", "mechanical_bikes", "electrical_bikes",
+            "latitude", "longitude", "status", "last_update", "address", "banking", 
+            "bonus", "connected", "overflow"
+        ]
+
+        # Liste pour stocker les données
+        data = []
+
+        for station_number, station_name in station_data.items():
+            # Récupérer les détails de chaque station
+            station_details = DataTools.get_station_details(api_key, contract_name, station_number)
+            if station_details:
+                row = [
+                    station_details.get("number", ""),
+                    station_details.get("name", ""),
+                    station_details["totalStands"]["availabilities"].get("bikes", 0),
+                    station_details["totalStands"]["availabilities"].get("stands", 0),
+                    station_details["totalStands"]["availabilities"].get("mechanicalBikes", 0),
+                    station_details["totalStands"]["availabilities"].get("electricalBikes", 0),
+                    station_details["position"].get("latitude", ""),
+                    station_details["position"].get("longitude", ""),
+                    station_details.get("status", ""),
+                    station_details.get("lastUpdate", ""),
+                    station_details.get("address", ""),
+                    station_details.get("banking", ""),
+                    station_details.get("bonus", ""),
+                    station_details.get("connected", ""),
+                    station_details.get("overflow", "")
+                ]
+                data.append(row)
+                data.append(row)
+
+        # Création d'un DataFrame pandas
+        df = pd.DataFrame(data, columns=headers)
+
+        # Sauvegarde en fichier Excel
+        df.to_excel(filepath, index=False)
+
+        print(f"Données sauvegardées dans le fichier {filepath}")
