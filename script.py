@@ -96,6 +96,16 @@ def create_bike_station_map(filtered_data_station, filtered_data_bike, specified
 
     # Create map
     map = folium.Map(location=map_center, zoom_start=6)
+    
+    # Add tile layers
+    
+    folium.TileLayer(
+        tiles="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+        attr="Google",
+        name="Vue Satellite",
+        overlay=False
+    ).add_to(map)
+    
     # Add markers with color 
     for lat, lon, station_id, places in normalized_data:
         # Appeler la fonction mise à jour pour récupérer le nombre de vélos
@@ -131,6 +141,9 @@ def create_bike_station_map(filtered_data_station, filtered_data_bike, specified
             popup=folium.Popup(popup_html, max_width=250),
             icon=folium.Icon(icon="bicycle", prefix="fa", color=color)
         ).add_to(map)
+
+    # Add layer control
+    folium.LayerControl().add_to(map)
 
     # Save the map to an HTML file
     map.save('velo_map.html')
@@ -250,13 +263,69 @@ def calculate_daily_bike_total_at_12h(data_directory, month, year, ville, nbr_ve
 
     return combined_daily_totals
 
+def calculate_hourly_bike_total_for_month(data_directory, month, year, ville, nbr_velo):
+    year = int(year)
+    month = int(month)
 
+    formatted_month = f"{year}-{month:02d}"
+    all_data_bike = open_all_files_in_directory(data_directory, f"data_bike_{formatted_month}", '\t')
+    all_data_bike = replace_headers_and_add_original(all_data_bike, correct_header_data_bikes)
+
+    filtered_data_bike = filter_dataframes(all_data_bike, filter_column='city', filter_values=[ville])
+    
+    # Concaténer tous les DataFrames filtrés en un seul
+    combined_data = pd.concat(filtered_data_bike, ignore_index=True)
+    
+    # Convertir la colonne datetime en type datetime 
+    combined_data['datetime'] = pd.to_datetime(combined_data['datetime'], errors='coerce')
+    
+    # Extraire l'heure de chaque datetime
+    combined_data['hour'] = combined_data['datetime'].dt.hour
+    
+    # Convertir la colonne 'bikes' en numérique
+    combined_data['bikes'] = pd.to_numeric(combined_data['bikes'], errors='coerce')
+    
+    # Grouper par heure et calculer la somme des vélos disponibles
+    hourly_available_bikes = combined_data.groupby('hour')['bikes'].sum().reset_index()
+    
+    # Calculer le nombre d'observations par heure pour normaliser les valeurs
+    hourly_count = combined_data.groupby('hour').size().reset_index(name='count')
+    
+    # Fusionner les deux DataFrames
+    hourly_stats = pd.merge(hourly_available_bikes, hourly_count, on='hour')
+    
+    # Calculer le nombre moyen de vélos disponibles par heure
+    hourly_stats['avg_bikes_available'] = hourly_stats['bikes'] / hourly_stats['count']
+    
+    # Calculer le nombre moyen de vélos utilisés par heure
+    hourly_stats['avg_bikes_used'] = nbr_velo - hourly_stats['avg_bikes_available']
+    
+    # Calculer le nombre de jours dans le mois
+    if month == 12:
+        next_month_date = datetime(year + 1, 1, 1)
+    else:
+        next_month_date = datetime(year, month + 1, 1)
+    
+    current_month_date = datetime(year, month, 1)
+    days_in_month = (next_month_date - current_month_date).days
+    
+    hourly_stats['total_bikes_used'] = (hourly_stats['avg_bikes_used'] * days_in_month).round().astype(int)
+    
+    # Créer le DataFrame final avec seulement les colonnes hour et total_bikes_used
+    result = hourly_stats[['hour', 'total_bikes_used']].sort_values('hour').reset_index(drop=True)
+    
+    # S'assurer qu'il y a 24 heures dans le résultat
+    all_hours = pd.DataFrame({'hour': range(24)})
+    result = pd.merge(all_hours, result, on='hour', how='left').fillna(0)
+    result['total_bikes_used'] = result['total_bikes_used'].astype(int)
+    
+    return result
 
 
 
 
 # Demander à l'utilisateur de spécifier l'heure (exemple: "2022-12-25 14:00:00")
-specified_time = "2022-10-09 19:58"
+specified_time = "2022-06-02 19:58"
 specified_time = datetime.strptime(specified_time, '%Y-%m-%d %H:%M')
 formatted_time = specified_time.strftime('%Y-%m-%dT%H')
 formatted_weather_pollution = specified_time.strftime('%Y-%m-%d')
@@ -298,24 +367,48 @@ for df in filtered_data_station_amiens:
    
 nbr_velo_amiens = filtered_data_station_amiens[0]['bike_stands'].sum()
 
+
+
 # Affichage du résultat
 print(nbr_velo_amiens)
 # Call the function
-#create_bike_station_map(filtered_data_station, filtered_data_bike, specified_time)
+create_bike_station_map(filtered_data_station, filtered_data_bike, specified_time)
+
 
 meteo = extract_monthly_weather_files_using_existing_functions(data_directory, month, years, 'Amiens')
+velo = []
+
+'''
+for i in range(0, 13) :   
+    try:  
+        velo.append(calculate_daily_bike_total_at_12h(data_directory, i, years, 'amiens', nbr_velo_amiens))
+    except Exception as e:
+        print(f"error {e}")
+    print(velo)
+velo = pd.concat(velo, ignore_index=True)
 
 
-velo = (calculate_daily_bike_total_at_12h(data_directory, month, years, 'amiens', nbr_velo_amiens))
+print(velo)'''
 
-
+velo = calculate_daily_bike_total_at_12h(data_directory, month, years, 'amiens', nbr_velo_amiens)
 # Extraire la colonne 'total_bikes' de 'velo'
 total_bikes = velo['total_bikes']
+
+print(velo)
+# Tracer le bar graph
+plt.figure(figsize=(10, 5))
+plt.bar(velo["date"], velo["total_bikes"], color='skyblue')
+plt.xlabel("Date")
+plt.ylabel("Nombre de vélos utilisés")
+plt.title("Utilisation des vélos en fonction de la date")
+plt.xticks(rotation=45)
+plt.grid(axis='y', linestyle='--', alpha=0.7)
+plt.show()
 
 # Reshaper la colonne pour s'assurer que l'index est bien aligné
 total_bikes = total_bikes.reset_index(drop=True)
 
-# Concatenation des deux DataFrames
+#Concatenation des deux DataFrames
 meteo = pd.concat([meteo, total_bikes], axis=1)
 
 # Vérifier le résultat
@@ -326,6 +419,9 @@ meteo = meteo.apply(pd.to_numeric, errors='coerce')
 df_numerique = meteo.select_dtypes(include=['float64', 'int64'])
 # Calculer la matrice de corrélation
 corr_matrix = df_numerique.corr()
+
+#print(calculate_hourly_bike_total_for_month(data_directory, month, years, 'amiens', nbr_velo_amiens))
+
 
 # Afficher la matrice de corrélation avec seaborn
 plt.figure(figsize=(10, 8))  # Taille de la figure
