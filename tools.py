@@ -277,14 +277,24 @@ class DataTools:
                     try:
                         lat = float(str(row["latitude"]).replace(",", "."))
                         lon = float(str(row["longitude"]).replace(",", "."))
-                        station_id = row["id"]
+                        station_id = row["id"]  # Station ID
                         places = row["bike_stands"]
-                        normalized_data.append([lat, lon, station_id, places])
+                        normalized_data.append([lat, lon, station_id, places])  # Add ID to the list
                     except (ValueError, TypeError):
                         continue
 
         map_center = [46.603354, 1.888334]
+
+        # Create map
         bike_map = folium.Map(location=map_center, zoom_start=6)
+        
+        # Add satellite tile layer
+        folium.TileLayer(
+            tiles="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+            attr="Google",
+            name="Vue Satellite",
+            overlay=False
+        ).add_to(bike_map)
 
         for lat, lon, station_id, places in normalized_data:
             bike_count = DataTools.get_bike_count_at_time(
@@ -300,7 +310,7 @@ class DataTools:
                     <h4>Station ID: {station_id}</h4>
                     <p>Vélos disponibles: {int(bike_count)}/{places_int}</p>
                     <div style="background-color: #e0e0e0; border-radius: 5px; padding: 2px;">
-                        <div style="width: {percentage}%; background-color: #76c7c0; height: 20px; border-radius: 5px;"></div>
+                        <div style="width: {percentage}%; background-color:rgb(18, 38, 36); height: 20px; border-radius: 5px;"></div>
                     </div>
                 </div>
                 """
@@ -323,7 +333,11 @@ class DataTools:
                 popup=folium.Popup(popup_html, max_width=250),
                 icon=folium.Icon(icon="bicycle", prefix="fa", color=color),
             ).add_to(bike_map)
+            
+        # Add layer control
+        folium.LayerControl().add_to(bike_map)
 
+        # Save the map to an HTML file
         bike_map.save("velo_map.html")
 
     @staticmethod

@@ -51,7 +51,7 @@ class Data:
         
         for i, step in enumerate(tqdm(steps, desc="Data cleaning")):
             if step == "Removing duplicates":
-                self.data.drop_duplicates()
+                self.data = self.data.drop_duplicates() 
                 time.sleep(0.1)  # Small delay to show progress
             
             elif step == "Filling missing values":
